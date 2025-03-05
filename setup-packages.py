@@ -8,7 +8,6 @@ packages = [
     "azure-core",
     "azure-search-documents",
     "PyMuPDF",
-    "azure-identity",
     "beautifulsoup4",
     "selenium",
     "webdriver_manager",
