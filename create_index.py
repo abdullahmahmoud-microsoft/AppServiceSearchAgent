@@ -25,15 +25,16 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 DEPLOYMENT_NAME = os.environ.get("DEPLOYMENT_NAME")
 API_VERSION = "2021-04-30-Preview"
 
-def generate_index_name(url):
-    slug = url.replace("https://", "").replace("http://", "").replace("_", "-").lower()
+def generate_index_name(url_or_identifier):
+    slug = url_or_identifier.replace("https://", "").replace("http://", "").replace("_", "-").lower()
     slug = re.sub(r'[^a-z0-9-]', '-', slug)
     slug = re.sub(r'-+', '-', slug).strip('-')
-    h = hashlib.md5(url.encode()).hexdigest()
+    # Generate a hash for uniqueness
+    h = hashlib.md5(url_or_identifier.encode()).hexdigest()
     return f"{slug[:60]}-{h[:8]}"
 
-def generate_valid_id(url, doc_index):
-    index_name = generate_index_name(url)
+def generate_valid_id(url_or_identifier, doc_index):
+    index_name = generate_index_name(url_or_identifier)
     return f"{index_name}-{doc_index}"
 
 def split_text(text, chunk_size=3000):
@@ -41,13 +42,11 @@ def split_text(text, chunk_size=3000):
 
 def scrape_authenticated_page(url):
     options = webdriver.EdgeOptions()
-
     driver = webdriver.Edge(options=options, service=EdgeService(EdgeChromiumDriverManager().install()))
     driver.get(url)
-
     try:
         WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.ID, "_content"))
+            lambda d: d.find_element(By.ID, "_content")
         )
     except Exception as e:
         print("Warning: Main content not detected; proceeding anyway.", e)
@@ -56,18 +55,12 @@ def scrape_authenticated_page(url):
     return html
 
 def extract_title(html):
+    from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, 'html.parser')
-    if soup.title:
-        return soup.title.get_text().strip()
-    return ""
+    return soup.title.get_text().strip() if soup.title else ""
 
 def extract_main_content(html):
-    """
-    Extracts the core documentation text.
-    It first looks for an <article id="_content"> element and, if found,
-    returns its text (after removing extraneous elements). Otherwise,
-    it falls back to collecting text from all paragraph tags.
-    """
+    from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, 'html.parser')
     article = soup.find('article', id="_content")
     if article:
@@ -77,19 +70,16 @@ def extract_main_content(html):
     else:
         paragraphs = soup.find_all('p')
         texts = [p.get_text(separator=" ").strip() for p in paragraphs if p.get_text().strip()]
-        if texts:
-            return "\n".join(texts)
-        return soup.get_text(separator="\n").strip()
+        return "\n".join(texts) if texts else soup.get_text(separator="\n").strip()
 
 def extract_sections_from_article(html):
+    from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, 'html.parser')
     article = soup.find('article', id="_content")
     sections = []
     if article:
-
         for unwanted in article.find_all(['nav', 'header', 'footer', 'aside', 'script', 'style']):
             unwanted.decompose()
-
         h2_containers = article.find_all("div", class_=lambda x: x and "h2-container" in x)
         if h2_containers:
             for i, container in enumerate(h2_containers):
@@ -102,7 +92,6 @@ def extract_sections_from_article(html):
                 sec_content = container.get_text(separator="\n", strip=True)
                 sections.append({"title": sec_title, "content": sec_content})
         else:
-            # Use headers if previous approach fails
             headings = article.find_all(['h1','h2','h3','h4','h5','h6'])
             if headings:
                 for i, heading in enumerate(headings):
@@ -132,7 +121,8 @@ def extract_sections_from_article(html):
             sections.append({"title": "Untitled Section", "content": full_text})
     return sections
 
-def generate_qa_pairs(text_chunk, url, max_retries=3):
+def generate_qa_pairs(text_chunk, identifier, max_retries=3):
+    # Calculate target number of pairs based on text length
     target = max(10, min(50, int(len(text_chunk) / 1000))) * 2
     prompt = (
         "You are called Antares Genie, an expert in engineering support for the Azure App Service Team led by Bilal Alam. "
@@ -209,7 +199,7 @@ def generate_qa_pairs(text_chunk, url, max_retries=3):
                     except Exception as e3:
                         print("Error parsing trimmed Q&A pairs:", e3)
                 return []
-    print("Max retries reached for", url)
+    print("Max retries reached for", identifier)
     return []
 
 def create_or_replace_index(service_name, admin_key, index_name):
@@ -343,7 +333,9 @@ def upload_documents(service_name, admin_key, index_name, documents):
     print(f"Uploaded {len(documents)} documents to index {index_name}")
     return results
 
-def main():
+# If running this file independently, you can test functions here.
+if __name__ == "__main__":
+
     urls = [
         "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/deploymentteamdocs/do-upgrade",
         "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/raregionexpansion",
@@ -413,69 +405,49 @@ def main():
     ]
     
     for url in urls:
-        print(f"Processing URL: {url}")
         html = scrape_authenticated_page(url)
-        if not html:
-            print(f"No HTML retrieved from {url}")
-            continue
-        
-        page_title = extract_title(html)
-        main_content = extract_main_content(html)
-        if not main_content:
-            print(f"No main content extracted from {url}")
-            continue
-        
-        sections = extract_sections_from_article(html)
-
-        qa_pairs = generate_qa_pairs(main_content, url)
-        
-        documents = []
-        doc_index = 0
-        
-        for section in sections:
-            sec_title = section.get("title", "").strip() or f"Section {doc_index+1}"
-            sec_content = section.get("content", "").strip()
-            if not sec_content:
-                continue
-            doc = {
-                "id": generate_valid_id(url, doc_index),
-                "doc_type": "section",
-                "page_title": page_title,
-                "title": sec_title,
-                "content": sec_content,
-                "file_name": url,
-                "upload_date": datetime.now(timezone.utc).isoformat()
-            }
-            documents.append(doc)
-            doc_index += 1
-        
-        for qa in qa_pairs:
-            if not isinstance(qa, dict):
-                print(f"Skipping non-dict QA pair for {url}")
-                continue
-            question = " ".join(qa.get("question", "").split())
-            answer = " ".join(qa.get("answer", "").split())
-            if not question or not answer:
-                continue
-            doc = {
-                "id": generate_valid_id(url, doc_index),
-                "doc_type": "qa",
-                "page_title": page_title,
-                "title": question,
-                "content": f"Question: {question}\nAnswer: {answer}",
-                "file_name": url,
-                "upload_date": datetime.now(timezone.utc).isoformat()
-            }
-            documents.append(doc)
-            doc_index += 1
-        
-        if not documents:
-            print(f"No documents created for {url}")
-            continue
-        
-        index_name_final = generate_index_name(url)
-        create_or_replace_index(SEARCH_SERVICE_NAME, ADMIN_KEY, index_name_final)
-        upload_documents(SEARCH_SERVICE_NAME, ADMIN_KEY, index_name_final, documents)
-
-if __name__ == "__main__":
-    main()
+        if html:
+            page_title = extract_title(html)
+            main_content = extract_main_content(html)
+            if main_content:
+                sections = extract_sections_from_article(html)
+                qa_pairs = generate_qa_pairs(main_content, url)
+                documents = []
+                doc_index = 0
+                for section in sections:
+                    sec_title = section.get("title", "").strip() or f"Section {doc_index+1}"
+                    sec_content = section.get("content", "").strip()
+                    if not sec_content:
+                        continue
+                    doc = {
+                        "id": generate_valid_id(url, doc_index),
+                        "doc_type": "section",
+                        "page_title": page_title,
+                        "title": sec_title,
+                        "content": sec_content,
+                        "file_name": url,
+                        "upload_date": datetime.now(timezone.utc).isoformat()
+                    }
+                    documents.append(doc)
+                    doc_index += 1
+                for qa in qa_pairs:
+                    if not isinstance(qa, dict):
+                        continue
+                    question = " ".join(qa.get("question", "").split())
+                    answer = " ".join(qa.get("answer", "").split())
+                    if not question or not answer:
+                        continue
+                    doc = {
+                        "id": generate_valid_id(url, doc_index),
+                        "doc_type": "qa",
+                        "page_title": page_title,
+                        "title": question,
+                        "content": f"Question: {question}\nAnswer: {answer}",
+                        "file_name": url,
+                        "upload_date": datetime.now(timezone.utc).isoformat()
+                    }
+                    documents.append(doc)
+                    doc_index += 1
+                index_name_final = generate_index_name(url)
+                create_or_replace_index(SEARCH_SERVICE_NAME, ADMIN_KEY, index_name_final)
+                upload_documents(SEARCH_SERVICE_NAME, ADMIN_KEY, index_name_final, documents)
