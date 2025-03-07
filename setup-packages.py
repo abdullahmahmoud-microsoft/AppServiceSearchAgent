@@ -8,11 +8,11 @@ packages = [
     "azure-core",
     "azure-search-documents",
     "PyMuPDF",
-    "azure-identity",
     "beautifulsoup4",
     "selenium",
     "webdriver_manager",
-    "python-dotenv"
+    "python-dotenv",
+    "flask"
 ]
 
 def install_packages(packages):

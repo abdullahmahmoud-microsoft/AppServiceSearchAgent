@@ -1,0 +1,13 @@
+# Needed for deploying to App Service
+
+azure-storage-blob
+azure-core
+azure-identity
+azure-search-documents
+PyMuPDF
+beautifulsoup4
+selenium
+webdriver_manager
+python-dotenv
+flask
+gunicorn
