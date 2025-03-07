@@ -17,13 +17,10 @@ OPENAI_ENDPOINT = os.environ.get("OPENAI_ENDPOINT")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 DEPLOYMENT_NAME = os.environ.get("DEPLOYMENT_NAME")
 
-# Initialize Flask app
 app = Flask(__name__)
 
-# Global in-memory session history (dictionary keyed by user_id)
 session_history = {}
 
-# --- Search Functions (unchanged) ---
 def get_indices(service_name, admin_key):
     endpoint = f"https://{service_name}.search.windows.net"
     credential = AzureKeyCredential(admin_key)
@@ -74,9 +71,6 @@ def generate_response(messages):
         print("Error processing OpenAI response:", e)
         return "No response."
 
-# --- Conversation Storage and Summarization ---
-# Import the QA generation function from the indexing module.
-# (We assume create_index.py is in the same directory)
 from create_index import generate_qa_pairs, create_or_replace_index, upload_documents
 
 def store_conversation(user_id, conversation_history):
@@ -86,21 +80,16 @@ def store_conversation(user_id, conversation_history):
     a list of Q&A pairs. Then it calls the indexing functions to create
     (or replace) an index and upload documents.
     """
-    # Concatenate the conversation history into a single text chunk.
-    # You might format it as "User: ...\nAssistant: ..." for clarity.
     convo_text = "\n".join([f"{role.capitalize()}: {content}" for role, content in conversation_history])
     print("Storing conversation:\n", convo_text)
 
-    # Generate QA pairs using GPT (this works similarly to your existing function)
     qa_pairs = generate_qa_pairs(convo_text, f"conversation-{user_id}")
     if not qa_pairs:
         print("No QA pairs were generated.")
         return False
 
-    # Prepare documents for indexing.
     documents = []
     doc_index = 0
-    # We use a placeholder title for the entire conversation.
     page_title = f"Conversation from {user_id}"
     for qa in qa_pairs:
         if not isinstance(qa, dict):
@@ -122,18 +111,15 @@ def store_conversation(user_id, conversation_history):
         documents.append(doc)
         doc_index += 1
 
-    # Create a unique index name for this conversation.
     index_name = f"conversation-{user_id}".lower()
     create_or_replace_index(SEARCH_SERVICE_NAME, ADMIN_KEY, index_name)
     upload_documents(SEARCH_SERVICE_NAME, ADMIN_KEY, index_name, documents)
     print("Conversation stored to knowledge base.")
     return True
 
-# --- Flask Endpoint for Bot Messaging ---
 @app.route("/api/messages", methods=["POST"])
 def messages():
     req = request.get_json()
-    # Assume that the incoming request contains a 'user_id' and 'text' field.
     user_id = req.get("user_id") or request.remote_addr  # fallback to IP if no user_id provided
     user_text = req.get("text", "").strip()
 
@@ -143,38 +129,27 @@ def messages():
 
     history = session_history[user_id]
 
-    # Check if the user is instructing the bot to store the conversation.
-    # Here we check if the message contains a trigger phrase.
+    # Check if the user wants to store the conversation in the knowledge base.
     if re.search(r'store\s+.*(knowledge base|index)', user_text, re.IGNORECASE):
-        # Call GPT on the entire conversation history to extract QA pairs and store them.
         success = store_conversation(user_id, history)
-        # Clear the conversation history (or keep it as desired)
         session_history[user_id] = []
         if success:
             return jsonify({"type": "message", "text": "Your conversation has been stored in the knowledge base."})
         else:
             return jsonify({"type": "message", "text": "Failed to store conversation. Please try again."})
 
-    # Otherwise, this is a normal chat message.
-    # Append the user's message to the conversation history.
     history.append(("user", user_text))
 
-    # Build the prompt messages for OpenAI including conversation history.
     messages_for_model = []
     for role, content in history:
         messages_for_model.append({"role": role, "content": content})
-    # Generate response using GPT.
     assistant_reply = generate_response(messages_for_model)
 
-    # Append the bot's reply to the conversation history.
     history.append(("assistant", assistant_reply))
-    # Optionally, you can query search indices and include that context.
-    # For example:
     search_results = query_search_indices(SEARCH_SERVICE_NAME, ADMIN_KEY, user_text, INDICES)
     if search_results:
         assistant_reply += "\n\nAdditional context:\n" + " ".join(search_results)
 
-    # Return the answer in Bot Framework's expected JSON format.
     return jsonify({"type": "message", "text": assistant_reply})
 
 if __name__ == "__main__":
