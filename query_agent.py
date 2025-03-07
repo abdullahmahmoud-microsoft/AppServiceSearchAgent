@@ -117,6 +117,10 @@ def store_conversation(user_id, conversation_history):
     print("Conversation stored to knowledge base.")
     return True
 
+@app.route("/")
+def alive():
+    return "Antares Genie is ALLIIVEEEEEE."
+
 @app.route("/api/messages", methods=["POST"])
 def messages():
     req = request.get_json()
