@@ -39,3 +39,7 @@ Open your terminal and run:
 git clone https://github.com/yourusername/deployment-assistant.git
 cd deployment-assistant
 ```
+
+### 2. Install Required Packages
+
+to be continued....

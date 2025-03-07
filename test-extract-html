@@ -1,0 +1,57 @@
+import time
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.edge.service import Service as EdgeService
+from webdriver_manager.microsoft import EdgeChromiumDriverManager
+
+def scrape_authenticated_page(url):
+    options = webdriver.EdgeOptions()
+    # options.add_argument("--headless")
+    driver = webdriver.Edge(options=options, service=EdgeService(EdgeChromiumDriverManager().install()))
+    driver.get(url)
+    
+    try:
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.ID, "_content"))
+        )
+    except Exception as e:
+        print("Warning: Main content not detected; proceeding anyway.", e)
+    
+    html = driver.page_source
+    driver.quit()
+    return html
+
+def extract_main_content(html):
+    soup = BeautifulSoup(html, 'html.parser')
+
+    article = soup.find('article', id="_content")
+    if article:
+
+        for unwanted in article.find_all(['nav', 'header', 'footer', 'aside', 'script', 'style']):
+            unwanted.decompose()
+        content = article.get_text(separator="\n").strip()
+        return content
+    else:
+
+        paragraphs = soup.find_all('p')
+        content = "\n".join(p.get_text().strip() for p in paragraphs if p.get_text().strip())
+        return content
+
+def main():
+    url = input("Enter the URL to test documentation parsing: ").strip()
+    if not url:
+        print("No URL provided.")
+        return
+    html = scrape_authenticated_page(url)
+    print("\n=== Full HTML Retrieved ===")
+    print(html)
+    
+    main_content = extract_main_content(html)
+    print("\n=== Extracted Documentation Content ===")
+    print(main_content)
+
+if __name__ == "__main__":
+    main()
