@@ -123,6 +123,7 @@ def alive():
 
 @app.route("/api/messages", methods=["POST"])
 def messages():
+    return jsonify({"type": "message", "text": "ECHO"})
     req = request.get_json()
     user_id = req.get("user_id") or request.remote_addr  # fallback to IP if no user_id provided
     user_text = req.get("text", "").strip()
