@@ -1,0 +1,3160 @@
+[Learning Day] Nick's Office Hours - Misc topics-20250306_173439-Meeting Recording
+
+0:02
+OK, so for today I'm going to talk through especially async await type of stuff.
+
+0:14
+This is something I've seen various, you know, misunderstandings on the team about from not just this is not a thing.
+
+0:24
+This async await like if you're like, I don't feel good.
+
+0:27
+I didn't get it.
+
+0:28
+I looked at asycl weight when it first came out for C# for like, I don't know, four weeks before it really just clicked.
+
+0:35
+I was like, oh, that's, that's how it worked.
+
+0:37
+OK.
+
+0:37
+It's, it's something that like once you get it, you get it.
+
+0:40
+But don't feel bad for not getting it at first.
+
+0:42
+Because if you're used to threading and models and how just the general multi processing works in general, then how asycl weight works in C# and various things is is a little different.
+
+0:57
+So we'll do a few demos and things to show you walking through for being Taurus code base first, right.
+
+1:04
+So let's just get a normal Taurus.
+
+1:08
+Let's go to Section 4.
+
+1:10
+Let's just get a clean dev branch going 5.
+
+1:14
+OK.
+
+1:17
+And by the way, people have asked asked me about this previously.
+
+1:21
+So PowerShell versus CMD.
+
+1:24
+One of the things that I do in PowerShell here is just you have a profile in PowerShell so you can run whatever scripts you want when the thing starts.
+
+1:36
+So if you look at I don't save this hang on, if I just look at my profile directory, you have a documents Windows PowerShell and this profile that happens.
+
+1:52
+This loads every time you do anything.
+
+1:55
+So 2 tips 1 you could disable the Windows 11 right click menu.
+
+1:59
+Highly recommend because so if you click open a code here, you get your 1 clicks because I use things like beyond compare and those sort of things.
+
+2:09
+There's, there's a previous session about some of these tips and tricks, but you have profile for whatever you want to do.
+
+2:15
+In this case, I, I customize and those sort of things people ask like how do I do VSI just bind my aliases in here?
+
+2:22
+Because, and the reason I do this is because this documents folder is synced to OneDrive.
+
+2:28
+That OneDrive is synced to all my machines.
+
+2:30
+If I had an alias here, the next terminal I open in my dev box will have this.
+
+2:35
+That's why I, I do it in that way.
+
+2:37
+So for anyone curious that was asking, that's that's why I do it that way.
+
+2:41
+So I just open up yes and I go in here and one of the things you're going to see, let's just say dot result.
+
+2:48
+OK, we're going to talk through some of the good and bad with async.
+
+2:52
+OK, so here is the controller and we just have a dot result.
+
+2:58
+I'm going to blow this up a little bit.
+
+3:00
+So in here, what we're doing is this is hey, go take an HTTP message, go send it across the Internet and come back and get that content and read through the content.
+
+3:10
+A content is like an encapsulation of what came back.
+
+3:14
+It's got headers, it's got bodies, it's got all that stuff, right?
+
+3:16
+And you say, hey, read that as async.
+
+3:20
+So it's just popping it off socket buffers now it's going back and forth and doing that.
+
+3:24
+So if I have data that's coming from across the Internet or from a disk or anything outside the processor, really your time to slow down your, your time spent waiting for new data and eating ACPU thread while you're doing that is a long time, a comparatively huge amount of time, anything that's not in memory.
+
+3:43
+So especially network IO, file IO, these are the things you want to be async on database calls all the above, right?
+
+3:50
+So when this thing's going, it says, hey, read is async.
+
+3:55
+And what that's doing is it returns a task of string.
+
+3:58
+So it will in the background get string bits as it can as stuff comes in the socket.
+
+4:03
+You know, you know, bytes have to like go, you're sending out, you're going out of your network card, going into the other machine, their network card, their stack all the way back.
+
+4:12
+And there's but ramp UPS in TCP windows and all this stuff that it's not instant.
+
+4:17
+It might take one communication if it's a very small thing, if it's in a packet or the initial congestion window for like how much, how many packets burst at once from the other end.
+
+4:27
+And it might take a while if it's like a ginormous string, in which case this would be a very bad way to do it.
+
+4:33
+But that takes a while and you don't use the thread the whole time.
+
+4:35
+So there's an async method to do this is the preferred way is to go and wait on that string.
+
+4:41
+And when you have it ready for me, then I will continue to do something with it.
+
+4:45
+And that's where a lot of people get tripped up.
+
+4:47
+How do I continue to use this afterwards?
+
+4:50
+So if you get that string back, and this could be string could be an object, it could be, you know, anything of the above, this thought result is really using two threads to do this at any given time.
+
+5:02
+OK, So what this is doing is the thread that's running this code that goes, you know, it's just stepping down, going through here and it gets to this.
+
+5:11
+It says, oh, I need to wait on this dot result.
+
+5:14
+I need to wait until this has a thing to assign this property and keep going.
+
+5:20
+OK.
+
+5:20
+But while it's doing that, this is a task of string.
+
+5:25
+This task gets tossed into a queue somewhere and it needs a thread itself to run.
+
+5:32
+So when you look at dot net, you have what's called a thread pool, OK.
+
+5:35
+And the thread pool is running to you're generally very small.
+
+5:39
+You can customize it.
+
+5:40
+You can do set and threads and these kind of things.
+
+5:42
+And I can show you some of those, but you don't want to use those.
+
+5:45
+Generally you want to say, why am I using so many threads?
+
+5:48
+How do I stop using so many threads?
+
+5:50
+And you'll see this like in data role to between.net Framework, which was 300 men threads to deal with all the blocking like this that was happening.
+
+5:58
+And then you'll see the new one sitting down at, you know, dozens of threads.
+
+6:02
+So when you have threads, people like, oh, I just add more threads.
+
+6:07
+You didn't get more CPU cores.
+
+6:09
+So that's not really a solution to most things.
+
+6:11
+It's the threads growing as a symptom of we are using threads inefficiently.
+
+6:16
+This is what a sink awaits meant to address.
+
+6:19
+But when we use it like this, we're not really doing that.
+
+6:22
+Ultimately, we're still just blocking one.
+
+6:25
+The thread coming through here is just waiting and this thread is just parked and it's using it off the thread pooland.net forever until it gets a result back.
+
+6:34
+And while it's doing that, this task over here that's been queued in the global task queue and it's running and I can say some dashboards for, you know how big things look like in our private stamps.
+
+6:44
+That thing has to go and finish and come back and that needs a thread for each phase that that task goes to.
+
+6:52
+Think of threads as like a this is, it's like lines at a counter, right?
+
+6:59
+Here's a big story I'm going to There are 8 windows.
+
+7:02
+That's my thread pool.
+
+7:03
+However, whatever's in queue for those is a thread pool.
+
+7:06
+Now, if everyone goes to the counter and they wait and you just sit there forever, this is basically the DMV and it doesn't end well, right?
+
+7:14
+There's just a ton of waiting.
+
+7:15
+Not very efficient.
+
+7:16
+You're like, what the hell is going on here?
+
+7:18
+Whereas if they say sit down, take a ticket, take a number, those counters can help everyone that has something to accomplish and do live at that particular time.
+
+7:30
+Hey, we're ready for you to sign.
+
+7:31
+Hey, we're ready for you to fill this out.
+
+7:32
+You do that thing and you go away.
+
+7:34
+That's a sink await.
+
+7:35
+Something's calling you and you continue.
+
+7:38
+So when you, you look at the compiler, it really breaks this method up into two methods.
+
+7:44
+Like the rest of this method is going to be a different method if you were to await it.
+
+7:49
+But in this case, we're not.
+
+7:50
+We're not awaiting it.
+
+7:51
+We're just calling dot result.
+
+7:52
+So this blocks here while that task runs in the background eating 2 threads.
+
+7:56
+And then when it completes, then we can go along.
+
+7:59
+This causes deadlocks for various issues.
+
+8:01
+I'm not going to go too deep into that specifically.
+
+8:03
+Let's just see how to make this behave correctly.
+
+8:06
+And there's a couple ways that this manifests.
+
+8:09
+So let's just go into link pad and show you a couple different ways that this is called sync over async.
+
+8:16
+By the way, this is like the general term we're looking for when you guys deep dive on this, there's async over sync, and they're sync over async because you can have an async task that ultimately goes down to a thread and then is doing something like this inside.
+
+8:29
+So if we just add a new thread and we say hey or add a new program here, so we'll blow this up a little bit.
+
+8:35
+OK, So if we just say, hey, public task Foo, and then this thing just does a so await, sorry, async task.
+
+8:50
+This is how you normally write the method, right?
+
+8:52
+So away pass dot delay 15.
+
+8:55
+And by the way, one of the things that you often see is people doing delay of like, I'm going to wait one millisecond or I'm going to wait 10 milliseconds.
+
+9:02
+That doesn't work.
+
+9:03
+And normal Windows counters, you're only going to get 16 milliseconds of resolution.
+
+9:09
+So if you wait for one, you're going to wait zero to 16 whenever the next counter ticks.
+
+9:14
+Because tasks, I said, are a ticket system, right?
+
+9:17
+So when you go into a task and it comes out, it's really when the thread pool had a chance to get to it.
+
+9:24
+So if you're not using your threads efficiently, you have less of a thread pool and things that you can do with it, which means all of your tasks back up and everything falls over.
+
+9:34
+This is the number one case of large apps falling overin.net.
+
+9:38
+So if right here we say we do Foo dot result, OK, so we're going to call it do dot result.
+
+9:49
+Sorry, we need to we need a result bool and then return true.
+
+9:56
+OK, and then we're going to call Yeah, so OK, so I'm going to run this program and it runs, it runs fine, but it's using those two things.
+
+10:08
+And if you look at how they how the method works for this, you'll notice that it really does break it up into your awaiter methods down here.
+
+10:18
+So the link pads a very good way to see this.
+
+10:21
+But this right here is not what I'm trying to illustrate.
+
+10:24
+So dot result is waiting and blocking.
+
+10:26
+While it's doing that, you can also do dot wait on it, right?
+
+10:30
+You'll see this pattern as well.
+
+10:32
+So there are two weights by the way, weight and weight async are different.
+
+10:36
+So like weight 10 for example.
+
+10:38
+So that's waiting 10 seconds before it blows up or before it will stop waiting on that thread, which creates more overheads, monitors and those kind of things there.
+
+10:49
+And there's also get a waiter, get result.
+
+10:52
+You'll see this in code.
+
+10:54
+And I get asked often like what's the difference between a dot result and this?
+
+11:00
+OK, everything seems to run.
+
+11:02
+Everything's got a delay, that kind of thing.
+
+11:04
+This is where it matters.
+
+11:05
+So if anything down there throws an exception, so new exception.
+
+11:10
+So my exception what happens up here?
+
+11:18
+This will throw my exception exactly what you want.
+
+11:21
+It did a thing.
+
+11:22
+I have a method.
+
+11:23
+I did a get a waiter get result.
+
+11:25
+It does some extra work.
+
+11:26
+It handles that call stack, it unwraps some things in that call stack and I get my exception.
+
+11:30
+Now if I do that result, what happens and I get that exception?
+
+11:35
+I get an aggregate exception because there could be many, many exceptions down within that stack and we don't know what happened and it doesn't do that extra work to unwrap it.
+
+11:45
+So part of Getaway or get result is.net unwrapping the exceptions for you and actually logging something.
+
+11:52
+Because if all we logged all day long with aggregate exception with this message, it wouldn't be very helpful.
+
+11:58
+So if you all if you have to do sync over async, then do use getaway or get result.
+
+12:04
+And that's why we push for that way of getting it in there.
+
+12:08
+So you're going to see if we do this method and we go look in our code base, does anyone want to guess how many results this is going to find?
+
+12:18
+I haven't.
+
+12:19
+I didn't actually do this before the call.
+
+12:20
+We're just going to wing it.
+
+12:21
+But my guess is a lot matching lines 1100.
+
+12:24
+Yep.
+
+12:25
+OK, dot result.
+
+12:29
+This is where you just go install the emergency eyewash station.
+
+12:32
+OK, There are 500 of these and you see all of these get results await and these are generally in where folks are.
+
+12:44
+Where they get hung up is hey, the method I'm in is a synchronous method right here.
+
+12:50
+So how do I make this async?
+
+12:52
+The answer is async is viral.
+
+12:54
+You need to have async all the way up to where you're calling.
+
+12:57
+And a lot of places we have actually solved this in controllers in ASP net.
+
+13:02
+They could be async and we, we don't do it in Onstart and stuff yet.
+
+13:05
+That will be something we jump to Onstart async and those kind of things.
+
+13:09
+I want to clean up the, the the downside of async is the stack traces look horrendous.
+
+13:16
+There are ways of handling this that I'm debating whether to show you or not, but the hell, I'll just show it to you.
+
+13:23
+OK, so we actually handle this in a place called Stack Exchange dot exceptional.
+
+13:30
+So this is a little library I maintain.
+
+13:33
+Oops.
+
+13:36
+We'll just search Google for it.
+
+13:37
+OK, Bing, Bing.
+
+13:39
+Sorry, we're in Microsoft.
+
+13:41
+So source shared phone right here.
+
+13:46
+OK, I'm going to regret showing this.
+
+13:50
+This is a regex right here because this is what the call stack looks like for.
+
+13:56
+So if you ever want to like judge me, yes, I've done things that it should be.
+
+14:00
+You know this is basically a war crime.
+
+14:03
+So this regex looks at the whole stack of an exception and we do this in text for a very specific reason.
+
+14:08
+When we're logging exceptions there is some expense to them.
+
+14:13
+Dean can show you some interesting examples on API Hub to where when you go async and your deep async like in the Cosmos STK it will do async and throw way above.
+
+14:26
+You can actually throw a stack overflow exception on our workers in Atari's because in by default the stack.
+
+14:34
+So when you create a thread, This is why threads are expensive.
+
+14:38
+Threads eat half a Meg of memory by default in IAS unless you overwrite it, they're at half a Meg.
+
+14:44
+So you get 512 K of space and so the more frames you add to that stack, the more space you are using And a stack overflow exception, which admittedly I I helped build stack overflow so we ruined the searchability on that one.
+
+14:58
+But once you get to a certain point, you just run out of stack space.
+
+15:01
+You don't have enough storage space for the frames and arguments for your stack in some cases.
+
+15:08
+And usually that's because you were recursively calling something a = b = C = a = b = C and you go up.
+
+15:14
+And then the stack overflow is to prevent just catastrophic filler in the system.
+
+15:18
+The thread is out of space, the stack's out of space, and you throw.
+
+15:22
+OK.
+
+15:23
+So you can also hit this in async just by having enough of a stack and possibly when throwing an error, because in asyncand.net Framework specifically, there's about a nine K payload that's hidden, there's an issue on this that will throw back to the call stack and it will eat way more stack space than you expect.
+
+15:43
+So sometimes, like in API Hub code, you'll see like a task that yield so that it resets the stack and hands it off to another task.
+
+15:51
+These are tricks you'll see in code.
+
+15:53
+But when you're analyzing all this and doing it, you have to realize that throwing exceptions at scale is already expensive.
+
+16:00
+If you're throwing exceptions with high volume, I think that the record that I've seen is about 500,000 or sorry, 500 million per 5 minutes from a single machine.
+
+16:12
+Sorry, my dog is greeting someone in Cosmos DB.
+
+16:18
+For example, right now Kevin Montrose is working on the how many exceptions they throw because that is death to their system.
+
+16:25
+So when you were trying to make something pretty, you have to figure out if it's the expense and where does it lie and how often do you pay that expense.
+
+16:34
+The reason I'm doing this in text and it looks ridiculous, but it's at view time.
+
+16:40
+I can just throw the stack out, log that text, which is relatively cheap, and then go analyze it later and see that it's collapsed and make it go and just make it more readable.
+
+16:52
+Because if you've seen an async stack trace, it's kind of nasty, right?
+
+16:55
+So here, let's just make one real fast.
+
+16:57
+So if you go in here and you said, hey, ask Foo, let's do a couple of these, Foo 2, Foo 3, oh wait, Foo 3, wait through two.
+
+17:14
+Sorry, return.
+
+17:16
+I just got to have the returns.
+
+17:18
+OK, and then we're going to do this.
+
+17:21
+So your call stack is prettified in link pad, you jerk.
+
+17:27
+OK, all right, so let's do a try on this.
+
+17:35
+OK, try and we're just going to two string it and then exception E So link pad you're always doing dot dump.
+
+17:52
+So this is doing a pretty this is doing a optimized thingin.net core to where it's removing a lot of the noise of a stack trace because it's it can tail call is what it's called on this because it doesn't need to await.
+
+18:07
+It's it's a lighting out of this.
+
+18:08
+So let's make it awake delay one again, this is a violation.
+
+18:16
+It doesn't actually work right.
+
+18:20
+OK, this demo is hosed because Linqpad made this pretty in a normal async stack trace, which we're going to see in here.
+
+18:28
+Let's just use I'm just going to use copilot real quick to grab an example of a stack trace.
+
+18:34
+All right.
+
+18:36
+Oh hey, and I just upgraded VS Code before this call which me oh sorry that's because I'm in a new workspace.
+
+18:44
+Let me do this code dot that was in my documents profile.
+
+18:50
+Your workspaces are always contextual.
+
+18:53
+OK, so folks do not upgrade your VS Code right before demoing.
+
+19:02
+OK, all right, show me an example of an async exception stack trace.
+
+19:10
+You've probably seen this in code.
+
+19:11
+I just wanted to show it on the table here.
+
+19:13
+What happens in here is that you have all of those steps in between of the frames.
+
+19:19
+There's things you care about which is your method call.
+
+19:21
+And then you always see like these 5 or 6 frames between a couple of things, which is this is not doing a very good job of stink exception stacktrace.net.
+
+19:33
+OK, just show an image of this.
+
+19:38
+It looks like this mess, right?
+
+19:43
+Exception dispatch throw not success handle debugger.
+
+19:46
+You you get this, right?
+
+19:48
+This is not good to show in mini dash.
+
+19:50
+It's not good to show in exception logs.
+
+19:52
+It's not it's it's generally just not very helpful.
+
+19:54
+This is good for the.net devs and it's not so good for a consumer to to have in a mass system like we have as a service.
+
+20:02
+We want the bits.
+
+20:03
+We want this Microsoft Entity Framework line, the next one, the next one.
+
+20:07
+We don't care about this stuff in between.
+
+20:08
+That's what that regex is doing.
+
+20:09
+It's finding these, sorting these, stripping these, and then compressing it down to what you want to see.
+
+20:14
+OK, so when we talk about moving some of the core of our services to async, one of the things we have to consider is you're doing servicing.
+
+20:23
+You're looking at these things.
+
+20:25
+What is your?
+
+20:27
+What taxes are we adding by adding async?
+
+20:30
+So on on start to make it look pretty and on start and do all the things async and gain some wins there.
+
+20:37
+On performance.
+
+20:37
+We also need to consider the usability.
+
+20:39
+So when something fails, what does it look like?
+
+20:41
+What does the average user experience for debugging an issue?
+
+20:46
+If you see this stack trace versus you look in here, what do you have about 6 relevant frames?
+
+20:50
+That's a lot easier.
+
+20:52
+You're going to have a screenshot that's posted in deployment chat and people are like, hey, what is this?
+
+20:57
+Those are the things we need to consider.
+
+20:58
+So one of the things that we need to do before pulling the trigger on on start and the rest of the deployment tooling and stuff is to do some of this work to remove some of the async noise that introduces.
+
+21:11
+That is a downside for usability.
+
+21:13
+So that's just why we haven't converted it yet and it's really the only reason.
+
+21:16
+So I'm going to put a method to do that in and we'll go that way.
+
+21:19
+But for the rest of this, So if we look at how these exceptions are thrown, right, so getaway to get result dot result dot wait, you can use the existing tooling to figure out how to make something viral async.
+
+21:35
+If it's, if it's narrow, if it's wider, it is a bigger project, right?
+
+21:40
+We have to do controllers in the end.
+
+21:43
+We have to do functions at the end, consoles in the end.
+
+21:46
+So there's some places we've added support that the team doesn't realize.
+
+21:48
+So let's take a primary example.
+
+21:50
+So if we're in Atari's deployment, OK, this is where all of, if you're not familiar with Atari's deployment, I'm sure the deployment team is this project is where we deploy things.
+
+22:01
+So this is setting up MI, it's deploying sequel, it's deploying storage, it's doing all the things during a deployment to set up our environments.
+
+22:09
+That's where all of this stuff lives.
+
+22:10
+When you run a template, you're running Atari's deployment.
+
+22:14
+And keep in mind one of the things I want to share real quick is if you're running a template, so like upgrade VMSS, right, you're probably familiar with this template, actually you're familiar with pre Val upgrade at VMSS, but this is the guts of it.
+
+22:28
+OK, so in here all of these fragments run and let's say verify a certificate.
+
+22:34
+So let's just go look at that fragment.
+
+22:36
+That fragment is launching internet's deployment.
+
+22:39
+Now we do a system to where we just launch the executable and we kick it off and we say do your thing.
+
+22:44
+And by doing it this way, it looks a little weird, but it is very retriable.
+
+22:51
+And so a deployment orchestrator will just go through these steps and it can retry this step just by relaunching the executable and running again and trying again.
+
+22:59
+So this keeps life very, very simple and very, very uniform across where we do our deployments.
+
+23:04
+Dev deploy or deployment orchestrator running on a GRS&ADO behave the same way.
+
+23:09
+They're just launching this thing.
+
+23:11
+So when people were talking about, hey, it's OK that I'm abusing the thread pool a little bit because it will grow over time.
+
+23:19
+No, it won't.
+
+23:20
+Not here because we're relaunching the executable every single time, which has a little bit of cost of deployment now compared to the things we're doing like waiting on ARM or deploying a sequel server or running scripts remotely, that launch time's not that great.
+
+23:33
+But you are resetting the thread pool every time when we do this.
+
+23:37
+So if we look in this project and we scope our search to this project and we say, hey, get a waiter, let's just look in here.
+
+23:49
+I bet the first thing we find.
+
+23:51
+So Azure tool.
+
+23:52
+OK, so this is doing a task factory.
+
+23:55
+Let's make this full screen where you can see it.
+
+23:58
+So this thing right here, it says, oh, OK, this, this is even worse.
+
+24:06
+OK, this is this is a better example.
+
+24:10
+So this right here says is resource group exists.
+
+24:14
+This is kicking off a task in the background to do this resource exists check and then we are unwrapping it and then getting in a waiter getting a result to continue.
+
+24:24
+So this is async over async over sync.
+
+24:31
+I believe that's right.
+
+24:32
+Anyway, what we should do is a whole lot simpler.
+
+24:35
+We should just say hey, but resource group so await here.
+
+24:45
+Actually this is this examples kind of I feel guilty using this example we'll find some other code here, but so that's what should happen.
+
+24:58
+That's a lot of this code is sync over async because the method is sync.
+
+25:03
+OK, so let's just grab something else here.
+
+25:05
+OK, so enable cache for Redis.
+
+25:07
+So this is a synchronous method that is used up in make sure AAD enabled for Redis, which is up in this method.
+
+25:16
+So we do have to chase it down a little bit for what we're going to.
+
+25:20
+So if any of these methods are ultimately in a command method, so validation tool, sorry here, validate Geomaster here is a command line.
+
+25:29
+It's not obvious to people, but this works OK.
+
+25:33
+So if you get a async task right here, it will it'll work.
+
+25:38
+The command line stuff that we have implemented as a library in the background does all of this.
+
+25:43
+And you can change all these to async.
+
+25:46
+Now if you're curious why am IA stickler for making this async, right?
+
+25:50
+And let's use your tooling, right?
+
+25:51
+So our async actually use your tooling to do it even better.
+
+25:57
+So if I do this and I say, hey, I want to make this async, right?
+
+26:03
+Use your VS tooling.
+
+26:05
+So I want to await this.
+
+26:06
+And what it's going to do, it's going to yell at you because this is an async method, right?
+
+26:09
+But if you just say, hey, make method async here, it will go ahead and do this and add the await rate here or, sorry, add the async suffix, OK?
+
+26:19
+And This is why I'm a stickler for the async suffix because when you go and look at this and you say, hey, which folder are we in here?
+
+26:27
+We're in folder 5.
+
+26:28
+OK, If I go look at a DIF in APR, it's going to look like this.
+
+26:33
+It's going to say, Oh well, if I save it, it's going to look like this.
+
+26:38
+It's going to say, hey, you, you renamed GM master async and it's here.
+
+26:43
+And I immediately see everywhere you touched it because you added the async suffix and that flags in APR that this right here is not awaited.
+
+26:54
+So this just kicks off the background and doesn't actually await.
+
+26:56
+And the program would even exit very quickly before this thing finished.
+
+27:00
+So we need an await right here.
+
+27:02
+And it's telling you that.
+
+27:03
+And we're working on analyzers that will have this, the the Visual Studio 1's a little heavy, but we will have analyzers that catch this because other, if you didn't want to await it, you would do like this and explicitly declare that you don't want to await it.
+
+27:15
+And_is a discard.
+
+27:16
+So it means I'm literally explicitly discarding that result.
+
+27:20
+So now this thing, instead of waiting on multiple threads doing all these things, this is a very small example because the program, like I said, launches each command, runs this and then gets this back.
+
+27:32
+And then we have, it's just doing this one thing and exiting.
+
+27:35
+So this is not a high impact thing, but these add up, especially as we called mini mini in a process or in the case of controllers and run times, this stuff really adds up.
+
+27:45
+This is our number one thread user, so I could talk through that and show you, hey, here's how all of this stuff works and you can ask me about it.
+
+27:54
+But if I actually say here, say like on tasks, what's the difference between using the results?
+
+28:04
+And don't forget, there's a ton of documentation on this.
+
+28:11
+There's a ton of blog posts on this, but you know Stephen Tobe has some awesome blog posts on async.
+
+28:17
+I do highly recommend reading those who want to dive in very deeply, But if you have a basic question about this, everything I just explained is summarized succinctly in an answer here.
+
+28:29
+OK, I want to illustrate that it's actually very, very powerful to go and ask those questions.
+
+28:33
+Especially I don't know how the basics work here or I don't know how the details of X works.
+
+28:38
+The the documentation crawling, especially for core concepts or for core APIs is actually exceptionally good here.
+
+28:45
+One of the things I was looking at just this morning, if I look in in Tory's deployment, one of the things that's inviting us in prod is that a worker has to have a runtime data dot Jason file.
+
+28:58
+And the way that we build this, this is we talked this morning about removing cloud services.
+
+29:03
+This is one of the isms that comes from cloud service.
+
+29:06
+So in cloud service, we had to understand the state of the world, which roles we have, what data roles we have, what workers we have because the worker the front end needs to ping the workers.
+
+29:17
+The data role needs to manage the workers.
+
+29:19
+The workers need to know which data roles to communicate to we need to have these relationships somewhere.
+
+29:24
+And so if you start the basic building lock of that, it is a map of the stamp, which is what we call runtime data dot Jason.
+
+29:31
+It's in it's in the E drive under config and you'll see it and we sync it.
+
+29:35
+We populated from the controller roll.
+
+29:39
+The controller roll pings arm says what stamps you got or sorry, what scale sets you got, what instances you got and it gets those and it gets the Knicks for them.
+
+29:48
+The network interfaces on AVM are in a control plane.
+
+29:51
+Don't reach the front of that one.
+
+29:53
+It's just Conway's law because the NRP team is not the compute team that has to check both.
+
+29:57
+So it goes and gets those.
+
+29:59
+And then workers find themselves when they start by IP to just answer the very basic question, who am I?
+
+30:05
+Like what kind of role of mine and what is my name?
+
+30:09
+These are the two things that a worker ultimately gets out of runtime dot data.
+
+30:13
+Runtime data dot Jason.
+
+30:15
+OK.
+
+30:15
+And this has caused so many issues in prod because a, it could be that in the North Europe incident, the runtime data didn't have a whole set of workers, which we've actually called the zombies because they just went and did their own thing and thought they were hosting sites, but they were just, you know, in a padded room.
+
+30:33
+They didn't know what was going on.
+
+30:35
+So those machines are just useless to the fleet.
+
+30:39
+But we didn't know about them because they weren't in the list and they didn't know who they were because they weren't in the list.
+
+30:44
+So they just sat there and spun and visuals VMSS runtime was just crashing on the workers.
+
+30:50
+And when you look at what a worker actually needs to finish starting, we don't even need that file, right?
+
+30:57
+Once you look into it, you say, hey, what do we need?
+
+30:59
+So if you look at the two pieces of information, I went and I looked at docs about six months ago to say, hey, where else can we get this information local from the box because VMSS, the rules have changed what's available on the server versus what's available in cloud service differ, OK.
+
+31:16
+And there's two things we pull the name and which upgrade domain that we are in for that particular again cloud service concept that it carried over in VMSS.
+
+31:25
+So what do they realize is you could just ask that question, right?
+
+31:30
+So in and I actually asked this, I use 365 for this kind of stuff for two reasons.
+
+31:39
+1 is I do a lot of work that's not coding.
+
+31:44
+A lot of my work is tearing out and it's not good at this yet because of the amount of tokens like hey, where is this used?
+
+31:51
+It has to check the whole solution for that.
+
+31:52
+And that's a that's a high cost operation.
+
+31:54
+So you run out real quick, but one of the things I look at in here is to say hey, say NVMSS, how do I get, and I don't need to know the terms, right people, you'll see demos for various things about prompt engineering and all those sort of things.
+
+32:15
+I think that's great.
+
+32:16
+I think the things that people can do are fantastic.
+
+32:19
+I think a system should to work with the just the basic interactions and asking something as simple as possible.
+
+32:28
+And if that works, then we're on to something, right?
+
+32:31
+So I just asked it right here, Hey, what do I get this?
+
+32:33
+This is from ARM, right?
+
+32:34
+This is not really what I was asking.
+
+32:36
+This is, hey, here's an API endpoint, OK, so how can I get it on the local machine?
+
+32:45
+And let's just say AC shirt as well, right?
+
+32:48
+And I haven't tried this, right?
+
+32:50
+I'm just guessing it will find this doc for me, which I had to go find, right?
+
+32:53
+I had to go find IMDS, everything else.
+
+32:56
+So we just found IMDS.
+
+32:58
+You, you've probably seen this in some incidents.
+
+33:00
+The special IP that exists, it's a, it's a wire server on the box.
+
+33:05
+And it's telling me exactly how to call it, what to get it and what that metadata looks like.
+
+33:10
+There's a, there's a Jason API locally on the box that we can go and get the machine name, right?
+
+33:17
+So this gets some machine name.
+
+33:19
+OK, So what about the update domain?
+
+33:25
+I'm asking simple questions and this right here is where I find the most value in my day.
+
+33:30
+I don't want to go find 500 docs for 500 systems.
+
+33:34
+I want to know what that thing is and move on to the next 300 things in my queue.
+
+33:38
+The faster I can pop something off my queue, the better.
+
+33:40
+And this is where it saves time.
+
+33:42
+So right here it tells me, hey, platform update domain is another metadata object on this.
+
+33:47
+And I bet if I go look up the IMDS documentation, Microsoft Jason.
+
+34:00
+OK, yes, Yep, compute here and this, the machine name it's talking about here will be our controller role in zero or zero.
+
+34:10
+We have to add the N because that's us.
+
+34:13
+That is something that's not gonna answer because we've carried over from cloud service.
+
+34:16
+The N comes from cloud service.
+
+34:18
+VMSS doesn't natively have it.
+
+34:21
+So these are the kind of things I think it's very, very useful for to go through and track if there's any questions around that.
+
+34:28
+But I tend to use Microsoft 365 for that kind of question that's more contextual than in code because I'm deleting code.
+
+34:37
+If you're writing code, it's way more useful for the other in.
+
+34:43
+So some things about that real quick, if you are, if you're NVS, you are behaviors are not so good on files.
+
+34:59
+I'm trying, I don't know a polite way to put this.
+
+35:01
+We have files that are way too damn long.
+
+35:03
+That's that's the basics of it, right?
+
+35:05
+There's different things we can do for this and we have started doing this in various places.
+
+35:09
+So if you see in Antares deployment and you look at like, I don't know, so sorry, let's do VMSS tool dot CS, you'll see a couple beside it, right?
+
+35:24
+So what we've done, I've done some of this Waze team done some of this, Carl Steam has done some of this.
+
+35:29
+A bunch of people have contributed here.
+
+35:31
+But one of the things you could do with your tooling is split out your files.
+
+35:34
+If you're not familiar with partials in C#, these are classes that are just stitched together at compile time.
+
+35:42
+Roslyn looks at the whole thing and any partial class here, it will go through all these partials and get the file back out.
+
+35:49
+OK, so but what we can do to make tooling easier, to make reviews easier?
+
+35:54
+Cuz think about ADO.
+
+35:54
+ADO is not going to render a file that is very, very large, right?
+
+35:58
+It says, hey, can't load this.
+
+36:00
+It won't even show the comments and all those sort of things, right?
+
+36:03
+When you split out stuff like this into concepts, honestly, like a 9000 line file doesn't help anybody.
+
+36:11
+But if we split it out into dot Geneva dot compute dot authorization, we don't need to change the entire API service area.
+
+36:17
+We can still say, hey, this is VMSS tool because that's what the team's used to, but it's not high friction.
+
+36:23
+But we can break it down into partials and each one has its own usings in here.
+
+36:31
+So we can break out the concepts and those sort of things.
+
+36:34
+There's ARM extensions and those sort of things that we break out into partials.
+
+36:37
+And when we're doing this, one of the things that you benefit from is some of the tooling and automation.
+
+36:44
+So if if you use Copilot to refactor things or you want to use Roslyn, just control or already in the built in tooling, it's faster on these smaller files.
+
+36:52
+It's just a lot easier to deal with and use when.
+
+36:56
+So for example, if I am looking at so one of the other things that we're we're doing silently, the reason I wanted to cover these partials with sync over async is a lot of these methods if you look at.
+
+37:10
+So let's just go to like the authorization 1.
+
+37:13
+So this is using Azure Resource Manager.
+
+37:15
+This is called a Wave 2 or a Track 2 SDK.
+
+37:19
+So anything that's Microsoft dot not web hosting, that's us.
+
+37:24
+But if you were like Microsoft dot resource Manager, that's wave one, that's the old SDK, it's not supported anymore.
+
+37:30
+And if you go into and you can see this on Nugent, right?
+
+37:33
+So Nugent, Microsoft dot Resourcemanager watch this big old red notice you get, hey, this is no longer supported or maintained.
+
+37:44
+It was built for.net Framework 452, which recently sometime in 1973 and then it hasn't been updated since 2022.
+
+37:51
+They did like a bug fix release, but all these for previews.
+
+37:54
+It hasn't had a stable release, well ever it turns out.
+
+37:59
+And all of these are deprecated.
+
+38:02
+There hasn't been CV ES to my knowledge, but our ARM API project is was a conglomerate of these things.
+
+38:09
+So these things are dead and gone.
+
+38:10
+These these patterns are gone.
+
+38:12
+They don't support MI, they don't support in any of the new bits.
+
+38:15
+So what you want to do is be on Azure dot resource manager.
+
+38:19
+So here this is the new stuff, Azure dot some some amount of SDK.
+
+38:28
+So when we're making these partials, we are very intentionally not bringing ARM API over, which is the old system or Microsoft dot over a partial being split is also using all of the new bits in the new SDKS.
+
+38:39
+So we're doing two things at once.
+
+38:42
+We are migrating code and moving it to the new isms and things that perform faster and support all the new hotness.
+
+38:48
+And not only it's not just about speed.
+
+38:52
+A lot of you have come to me about, hey, we want to use this new property or this new feature that's only on this new API in ARM for this other team.
+
+38:59
+We're working with storage or whatever, right?
+
+39:02
+The old API is just not going to have that, that property post dates when they stopped messing with that thing.
+
+39:08
+So if they add some new fancy hotness, it's never going to be in an old API.
+
+39:12
+So we either have to fork it and copy all the code.
+
+39:15
+It's very bad, that's what our own API was, or we go to the new stuff and we're just better off for it, get better security updates and all this kind of stuff.
+
+39:23
+So when we are looking at all of these bits in some of the.
+
+39:31
+So this is actually written pretty well, right?
+
+39:33
+It's async all the way down, async all the way down.
+
+39:36
+There are cases.
+
+39:39
+So unfortunately, all right, so Juan Chan's working on this from Waze team, doing a fantastic job at port and he's doing the Compute SDK right now.
+
+39:48
+There's a very big PR.
+
+39:49
+If you want to see it, I can link it in chat.
+
+39:52
+This is done pretty well.
+
+39:53
+All of these are using the async methods.
+
+39:55
+I'm trying to catch this in PR reviews, but if this was not using the async method, keep in mind that there is a sync method for this.
+
+40:02
+And I see this all the time, right?
+
+40:04
+So BMSS stamp sub.
+
+40:07
+Dot get storage account.
+
+40:09
+You see there's two different methods.
+
+40:10
+OK, so there's a sync and there's the async.
+
+40:13
+All this sync one is doing is hiding the fact it's async from you.
+
+40:18
+It's just under the covers.
+
+40:19
+OK, so if I go into this method and by the way, any method, you could just go to the implementation of even if it's decompiled or it's source linked, it will load all of this out.
+
+40:29
+So if you look at this, it's going get storage accounts and then it calls down to this guy.
+
+40:35
+It's just all of these STKS have a method or two wrapping the things I want to go to implementation, go to definition, there we go.
+
+40:51
+So get after I was just bragging on it, it didn't do the thing.
+
+40:58
+Guess so get storage accounts.
+
+41:00
+This is the synchronous method, right?
+
+41:03
+What it's really doing is calling into this client create pageable.
+
+41:15
+We're going to go down to the bottom of this.
+
+41:17
+It's not navigating for me.
+
+41:19
+You can just trust me that at the end of this it's ultimately doing a getaway to get result.
+
+41:23
+That is how these sync methods work in these AP is because they're either calling into the HTTP client, which is async and sync sync methods.
+
+41:34
+If you if you follow.net core.net five in link pad here you can see select var C equals new Http://client.
+
+41:48
+OK, we're going to get system net HPC dot get async, right?
+
+41:54
+There's no, there's no direct sync method for this, but there are sync methods in all of the APIs because of the send.
+
+42:05
+So they want to encourage good behavior by if you were to call get async here, right?
+
+42:11
+There's no GET, but there it ultimately all the GET methods and send methods and POST methods, sorry, GET, POST, delete, all your verbs are really calling this send method.
+
+42:21
+It sends a thing underneath covers and you'll notice there's a sync version and an async version.
+
+42:26
+The reason for this is because of the Azure SDK.
+
+42:29
+They have so much weight and power that they added these sync method, this send method synchronousbackinto.net.
+
+42:37
+It's not really sync, it's really weighing on a socket.
+
+42:40
+It's really eating your threads.
+
+42:41
+It's not good behavior, but it's there.
+
+42:44
+So do keep in mind that when you have the sync stuff, you are doing things that are not healthy for the application.
+
+42:52
+This is really most true in our control plane.
+
+42:55
+Just because thread goes in control plane do a thing, thread goes out.
+
+43:00
+Whether it be down to the database, from the Geo down to the controller.
+
+43:04
+We are eating a lot of threads in those areas.
+
+43:07
+On a worker, most things that are immediate, it's pretty well, you know, local.
+
+43:14
+But when you're talking about like a proxy API, like a a front end or a controller or a Geo, those sort of things, it really matters.
+
+43:21
+Now the we're all in the new hotness with the front end.
+
+43:24
+So it's all async, it's all care BFE that's very efficient.
+
+43:27
+Other places we're still working through so and you can again, if you do the heck, sorry, all my key bindings are a mess up.
+
+43:43
+And you can like ask in here for go about stuff to say like give me the async versions or asyncify this whole method to help you convert and go through because it's time consuming for me to go through and find out all of the synchronous methods that we're calling in here.
+
+43:58
+So that's another good use of tooling when you're looking and you're not familiar with sync async and what all the API methods on are on the SDK.
+
+44:04
+And I don't expect you to be and you shouldn't be an expert in it.
+
+44:07
+It's a waste of your time.
+
+44:08
+But having a having the tooling can help you find all that is, is pretty helpful.
+
+44:16
+OK, one of the things I do want to cover because I see this in the team a lot is dependencies.
+
+44:23
+OK, so if you modify ACS project file, it calls me at 2:00 AM and says go look at the PR because we do a lot of bad things in CS project files.
+
+44:33
+Atari's deployment, it is what it is.
+
+44:37
+It's a giant cluster of APIs that we need to do deployments.
+
+44:42
+As we move from these to these, it'll get shorter.
+
+44:47
+But this is not a runtime thing.
+
+44:49
+It's deploy only thing.
+
+44:51
+It is what we need it to be.
+
+44:52
+OK.
+
+44:53
+In other cases where we're talking about, hey, this runs on a worker, this runs in a data role, this runs in a high traffic sort of situation, we really need to be efficient.
+
+45:02
+And being efficient matters in several ways.
+
+45:05
+So on a small worker, we only got about a gig of memory to deal with one of the worker team on the clock can tell me the exact numbers for small, medium, large.
+
+45:13
+But we fight with the amount of memory we leave for a customer to run.
+
+45:17
+So every dependency we add that has to get loaded into memory for our stuff on the box takes away from what a customer can run.
+
+45:25
+It also takes away from what we could run when the customer doesn't have enough room or we don't have enough room and you run out of memory.
+
+45:32
+The system has to tell all the processes, hey, you're out of memory.
+
+45:36
+So it's, there are different pressure events that happen in Windows.
+
+45:39
+Generally when you reach 85% memory and 90% memory, pressure events are sent out, says, hey, whatever you're not using, please release it for the help of the system.
+
+45:50
+And that triggers a garbage collection.
+
+45:51
+So they run for various reasons, because you've hit Gen.
+
+45:54
+0 limits and those kind of things.
+
+45:56
+But system pressure events also trigger GCS.
+
+45:59
+That's one of the things.
+
+46:00
+Now importantly, system gceventsin.net are just from the system.
+
+46:07
+So think about that.
+
+46:08
+If we have a lot of different processes on the system, and this is how, this is also why we need to think about having being careful about which processes we're putting on a box, right?
+
+46:17
+One of the things that Peter and I fight back against is having new agents on the box.
+
+46:21
+Every team loves Antares.
+
+46:24
+If they could deploy their agent, we want you.
+
+46:26
+You're a big fish.
+
+46:27
+You would prove this out.
+
+46:28
+Please let us put our agent on your box.
+
+46:31
+And we have to say no a lot.
+
+46:33
+So we're working with the VMSS team to try and figure out how to collectively get this sorted out.
+
+46:41
+Because every team making their own agent against just Conway's Law is not going to end well.
+
+46:47
+We're just going to have 400 agents on a box and no room to run anything.
+
+46:50
+So we're pushing that back.
+
+46:53
+But there's stuff.
+
+46:54
+So every one of those that load stuff, additional memory.
+
+46:58
+Now, if you have little agents on the box thatare.net specifically, and they react to this GC event and they go to collect things, they go to free their memory.
+
+47:05
+You're like, oh, that sounds good.
+
+47:06
+We got more free memory.
+
+47:08
+Well, they're all doing it at once, so they're all eating CPU to crawl through their heaps and figure out what can be released from memory, which means when you hit this memory threshold, the response is ACPU spike.
+
+47:22
+And we do get CR is on this for a worker has to go through in process and say like, Hey, what, what can I check out?
+
+47:29
+And all the different.net processes in the box are participating.
+
+47:32
+So you see this at scale.
+
+47:33
+The the office team does this.
+
+47:37
+I'm I'm blanking on their platform name right now.
+
+47:40
+They have this fabric in the the 365 group that runs hundredsof.net processes on a box.
+
+47:47
+It's actually amazing that they can coordinate this, but it's very, very carefully tuned and they run many, many hundreds of processors of processes on a box that's beefy and that's how they do their orchestration.
+
+47:58
+And they are very sensitive to something like that.
+
+48:00
+So we are, but for different reasons.
+
+48:02
+We have small workers and and customers on them.
+
+48:05
+So when we add a dependency, especially the core thing.
+
+48:11
+So let's take an example.
+
+48:12
+Let's go to Microsoft dot web dot hosting.
+
+48:16
+There are three big libraries that we GAC in the memory.
+
+48:21
+So GAC if you haven't heard this before in a session, GAC is the, you know, central.
+
+48:29
+Why am I not getting any?
+
+48:32
+What?
+
+48:33
+Hang on, again, don't update your tooling right before I think, yeah, that works.
+
+48:49
+What the heck?
+
+48:50
+All right, so this is the web hosting project.
+
+48:52
+So in the GAC, the GAC is called the Global Assembly Cache, also known as the source of galactic evil.
+
+48:56
+So the Global Assembly cacheisfor.net for to share assemblies.net frameworkspecificallynot.net Core, one of the other reasons we're moving to core.
+
+49:05
+And so anything in the Global Assembly Cache, it prevents that double load everywhere.
+
+49:10
+I've already got this thing.
+
+49:11
+It's already there.
+
+49:12
+Now you might load it into process space for various reasons, but at least it can fetch it fast.
+
+49:16
+And the other thing that happens is down that core, this little, the thing I showed you here, where you get the IL, this is if you remember the Java bytecode, this IL is what's out.
+
+49:29
+I don't know why it's not full contrast, but whatever.
+
+49:34
+So this IL is what is in the assembly.
+
+49:37
+This is what we outputfrom.net.
+
+49:39
+Unless you fully engine it, this is what's output as bycode.
+
+49:44
+This cause this cause this.
+
+49:45
+This is how.net works because you might be calling in a method that's in coreof.net and it just says hey, go call that method.
+
+49:52
+That's that's IL.
+
+49:54
+The first time you load it, it needs to put it down into assembly.
+
+49:58
+This is what it would look like on my machine for assembly, but this is not what is generated in the compile, OK?
+
+50:04
+It just generates the IL.
+
+50:06
+This is a link pad doing the extra step.
+
+50:08
+So when it runs this the first time, it does column two to column 3 here and generates that assembly on the right hand side.
+
+50:17
+You're like, hey, why don't we do this ahead of time?
+
+50:19
+You can if you want to look into that concept.
+
+50:21
+It's called AOT ahead of time compilation.
+
+50:24
+JIT is just in time compilation.
+
+50:26
+So if you hear the JIT, that's what that stands for the JET, the first time you run this thing will convert this into assembly that has start up costs the first time you do it.
+
+50:35
+So one of the things the GAC does is it runs that cost once and it creates this other folder.
+
+50:40
+So if you're look on your machine, there is an IL folder and then there's beside it an X32 and an X64 folder.
+
+50:46
+And that's what happens.
+
+50:48
+Depending on which process you're running, it will do assembly for X86 or X64.
+
+50:54
+So the GAC is helpful for those things.
+
+50:57
+For everything else, it sucks and we hate it because we can't add dependencies, we can't move stuff around, and it really limits what we are able to do for several reasons.
+
+51:07
+A for some reason, a long time ago, we're still tracking this down.
+
+51:11
+The there are extensions that reference Microsoft web hosting specifically in the GAC on our workers, their site extensions that depend on us being there.
+
+51:21
+So we'll figure that out later.
+
+51:23
+But if we get out of the GAC entirely, at least for these dependencies and move stuff around, then we have some wiggle room about what we can change and what we can move and what we can go forward with.
+
+51:33
+Otherwise, the GAC is just tying a hand behind her back the entire time.
+
+51:37
+So if you see me moving stuff around, shuffling, that's the game we're playing.
+
+51:40
+We're trying to get out of those constraints, OK, because on a worker, what is available in the GAC, our assemblies shouldn't be.
+
+51:49
+However, if you look at Microsoft web hosting, what do we do?
+
+51:53
+We reference administration.
+
+51:55
+We reference the, these are just in the GAC.
+
+51:57
+These are references, but we also have some packages down here and then in common as well.
+
+52:04
+So Microsoft dot web dot hosting dot common and tracing, these are the three libraries we do.
+
+52:12
+Tracing doesn't have any dependencies, so it's fine.
+
+52:14
+But you see these package references right here.
+
+52:17
+So these only comein.net 8.
+
+52:18
+Again, not to put them in the GAC, but these right here are in the GAC.
+
+52:23
+They have to be in the GAC.
+
+52:24
+Anything that's in the GAC, it's dependencies have to be in the GAC for various reasons, but it has to be there.
+
+52:29
+So that means I can't, for example, move us from System Data Sequel Client to Microsoft Data Sequel client because of so much stuff being this would be either I have to Add all of that to the GAC or something else.
+
+52:46
+And something else is definitely the preferred option.
+
+52:49
+Now the reason for that is on a worker, if we change anything at all, someone will complain.
+
+52:55
+We can make it faster, someone will complain.
+
+52:57
+Make it slower, someone complain.
+
+52:58
+We add or remove a dependency, someone will complain.
+
+53:01
+You cannot please 100% of people at our scale.
+
+53:04
+The bigger the change, the more complaints.
+
+53:06
+Every change is a breaking change for what we do.
+
+53:09
+So on a worker, what is in the GAC is basically our stuff, and what these packages pull in, we've had to GAC them for a very long time.
+
+53:18
+If you're curious about where this happens, there is a Wix file called web hosting dot WXS.
+
+53:25
+This is it's super intuitive, I know.
+
+53:29
+So I'm working on porting this to Wix 5.
+
+53:31
+John Walls is working on me.
+
+53:32
+We need to change how drivers are installed, specifically the sandbox driver.
+
+53:36
+But after that, we can port this to a newer Wix and it's just a little bit better.
+
+53:40
+We don't install.net 35 anymore.
+
+53:42
+That's exciting.
+
+53:43
+This would be a big milestone.
+
+53:45
+So if you look for assembly, yes, that's not a joke.
+
+53:48
+We do install Framework 35 to build because Wix that we package this MSI with needs.net 35.
+
+53:56
+Don't wait too far in the weasel now.
+
+53:58
+So if you look at this file, this is the package of stuff we've been moving stuff out of to get out of this business on various roles.
+
+54:09
+On a load balancer, it installs X on a worker, installs Y on a controller, installs, you know, the import export service and those sort of things.
+
+54:15
+Now, import, export, ServiceNow runs out of app root, but it needs to run some stuff in the sandbox like Sequel exports, my sequel exports, Postgres exports.
+
+54:26
+These are things we support for.
+
+54:27
+I think I got the e-mail this morning.
+
+54:28
+In another three years, yay.
+
+54:31
+But hey, it's finally under deprecation.
+
+54:33
+Those kind of things we need to put in the web hosting folder.
+
+54:36
+So if you ever go to see Program Files on a worker IIS web hosting frame, Microsoft web hosting framework, that's where all this comes from.
+
+54:43
+This installer just pops a lot of files in there.
+
+54:46
+Now, if you're like, hey, this looks insane.
+
+54:49
+It's listing every TLL.
+
+54:51
+And what if this package adds a new dependency or a D LL or changes in any way?
+
+54:56
+Because package references are transitive, right?
+
+54:58
+Anytime you reference a package, anything it needs, it pulls.
+
+55:02
+So let me show you the prime example of this right now.
+
+55:05
+If we look at on Nugent and you can, there's a couple Nugent tips we can do it here.
+
+55:12
+So if you do system.data.sqlclientasoftodayindevallof.net 8 is on the new stuff.
+
+55:20
+So this is the old stuff, Microsystem Data SQL Client.
+
+55:23
+This was built into full framework.
+
+55:25
+So on full framework, this package is really just a Shim that just points over.
+
+55:30
+But in new framework, Microsoft Data Super client, which is new stuff, it's got retries, it's got TDs stream handling, it's got MI, it's got all of the stuff that we want in Azure.
+
+55:40
+So it's just better all around.
+
+55:42
+And you'll see that this is not supported anymore either.
+
+55:46
+This I mean, it's supported, but it's end of life pretty much in terms of getting any kind of features.
+
+55:51
+So if you look at the dependencies for this thing, pretty much nothing.
+
+55:56
+Now if I want to move us, and I do to Microsoft dot data dot sequel client, it pulls in these dependencies, which is not awesome because on a worker we would be sticking all this stuff in the GAC.
+
+56:09
+Which means we would either tonight either need to a go in the sandbox and pretend it's not in the GAC.
+
+56:17
+Yes, we do this when we move from our own copy of Newton Soft.
+
+56:21
+Someone that's been here longer than me in the chat can answer for that one.
+
+56:25
+But we had our own copy of Newtonsoft 4 O and we were we had a custom fork and build a namespace and everything for a long time just so the customers couldn't see it.
+
+56:34
+To get the project system like where it is today, we really need to like stop doing the hack.
+
+56:39
+So we had to put actual Newtonsoft in the GAC and to do that we knew customers.
+
+56:44
+So the reason this matters is a customer to place their app on app service.
+
+56:48
+They've done it wrong.
+
+56:49
+They didn't include all of their dependencies, right?
+
+56:53
+So they have a bin folder that they output and they didn't include these two DLLS.
+
+56:57
+Whatever reason their build was messed up, who knows If it's in the GAC, it will just work.
+
+57:03
+It will silently work.
+
+57:05
+So if we remove it one day, that's when we introduced pain.
+
+57:08
+Adding it to the GAC is not a problem.
+
+57:10
+Removing it or ever removing it, that's the problem.
+
+57:13
+Because whatever we put in the GAC, we pretty much just have to leave there forever.
+
+57:16
+It could have CV, ES, so you get you.
+
+57:19
+You can't win either way.
+
+57:21
+You'll either get a report that it's missing, in which case customer apps just broke as we upgraded into our race.
+
+57:26
+That stops train.
+
+57:27
+That's trouble, right?
+
+57:28
+Or a customer goes, hey, what's in the GAC?
+
+57:32
+Is this really old version?
+
+57:34
+What's up?
+
+57:35
+What is this?
+
+57:36
+My security scanner found it.
+
+57:37
+Trust me, we will get tickets on either side of that one.
+
+57:40
+So the best, the only way to win with the GAC is not to play.
+
+57:44
+So what we will do is get the SQL bits out of where it would touch the GAC.
+
+57:50
+That's some of the stuff happening when you're seeing.
+
+57:53
+The reason I'm pointing this out is because if I were to put Microsoft Data SQL Client down in Microsoft web hosting, every project that uses Microsoft web hosting would now have a ref to all of these things as well.
+
+58:06
+It would dramatically bloat our build.
+
+58:09
+And if you think about what in our infrastructure actually needs to talk to SQL, it's relatively few things.
+
+58:15
+Only, you know, some APIs and like DYS and a couple other bits actually need to go talk to SQL and long term the worker may not at all.
+
+58:25
+So for us to add that weight everywhere, because if you look at Microsoft web hosting and the best way to search for this is in, I think VS Code.
+
+58:34
+So like Microsoft dot web dot hosting dot csproj, just search for that as your dependencies.
+
+58:41
+If we added a dependency everywhere that's in any of these projects, it would get added to and any project that references these projects, it would get added to.
+
+58:52
+So you can quickly see it's pretty much in the entire solution.
+
+58:55
+There's very few things that don't reference Microsoft web hosting.
+
+58:58
+So if we're going to add a big dependency like my and if you're curious why, why the hell does Microsoft Data SQL Client reference these things, all of them like Azure Identity, It shouldn't.
+
+59:13
+Had I been in the room when we did this, had a lot of us in the data space been in the room, this wouldn't have happened.
+
+59:20
+This is very, but unlike any other API.
+
+59:24
+This is purely because in Microsoft Data SQL Client in the connection string you can say connect with managed identity.
+
+59:34
+That's why.
+
+59:34
+That's the entire reason so that you can connect my connection string.
+
+59:38
+It needs all of the managed identity stuff to make that happen.
+
+59:41
+Open ID, connect Azure Identity, that's where all that comes from.
+
+59:45
+So even if you're on Prem and you have a SQL Server right here and you're connecting with user password or open or whatever, doesn't matter, all this weights coming along.
+
+59:55
+No other SDK did this that's add in or optional, whatever this is, this is not normally how it happens.
+
+1:00:00
+So these are the kind of things that stand in our way and why you have to be very careful about what we're adding and where we're doing it too.
+
+1:00:07
+So if you add something to any project like Microsoft web hosting and and many of you have tried and we've talked in PRS and I think most people get like once you hit it, you understand it.
+
+1:00:17
+But for everyone else that hasn't hit it yet.
+
+1:00:19
+This is why these dependencies really matter, because anything added there is just transitive up.
+
+1:00:24
+And some of these, this is a big project, GSQL sequel, but even small ones like Azure DNS, this is Atari's Azure DNS, which else worked on decoupling some of this, which is looking good.
+
+1:00:38
+This is Our Calling of DNS.
+
+1:00:40
+That's the thing that backs us, our infrastructure DNS, not a customer's DNS.
+
+1:00:44
+There's two sides, right?
+
+1:00:45
+Joe's team works on DNS for outside coming in.
+
+1:00:50
+This is for us on the back end registering where a controller is and all that kind of things.
+
+1:00:55
+So even that would and it doesn't talk to sequel.
+
+1:00:59
+It doesn't need any of that weight.
+
+1:01:01
+So as we move stuff around, we're very methodical about where these refs happen.
+
+1:01:05
+Another one happening right now is for you can actually see actually here I got a good example of this.
+
+1:01:11
+So in APR right now for Sawa asked about Mize.
+
+1:01:15
+So there is a project called Mize which is Microsoft Identity dot Service Essentials.
+
+1:01:21
+That's what this is.
+
+1:01:22
+And so one of these projects updated today.
+
+1:01:34
+I pushed it earlier, I'll find it.
+
+1:01:38
+And there I'm talking.
+
+1:01:39
+So here we go.
+
+1:01:42
+My is complex.
+
+1:01:43
+So if you look at this PR right here, here's an example of just how weighty this thing is.
+
+1:01:47
+So what, what?
+
+1:01:49
+So I need to do what he's trying to do because we are required to adopt this.
+
+1:01:53
+So in some cases, we have to make the best of what we can.
+
+1:01:55
+And how we structure our projects determines how impactful these directives are for security.
+
+1:02:01
+So this my stuff is about validating that whatever security stuff we're dealing with token from a user us to a destination us validating whatever phase it is we have to there are some initial validations to whatever we can do to protect, you know, exploits and security.
+
+1:02:22
+They add in some of these package have their own telemetry because they report up to a Cousteau system ultimately for someone that entity to look at and all of these have their own baggage.
+
+1:02:30
+So these things get weighty, especially internally.
+
+1:02:33
+It's they're not they're not very well done in terms of efficiency.
+
+1:02:36
+So just by adding these packages to this one project, so I did build this and so I could just illustrate this for you.
+
+1:02:44
+So I have this in server ads, which is folder 4.
+
+1:02:48
+So if we do beyond compare here and we compare, and the reason I maintain a baseline folder and a in other folders is so that I could just quickly compare what's where.
+
+1:03:01
+Oh, here what was the last one I did.
+
+1:03:02
+So if we just look at expanding this, let's refresh this guy.
+
+1:03:10
+Oh, I'm sorry, this is not should be a wrench closer.
+
+1:03:15
+So this is the baseline and I'm only looking at orphans.
+
+1:03:18
+This is a very common view I do to see what's missing.
+
+1:03:21
+Look at this 7.83 gigs has gone to 7.99 gigs.
+
+1:03:25
+This is how these things really add up and you see to every one of these folders.
+
+1:03:31
+Look at this stuff.
+
+1:03:36
+It's a mess.
+
+1:03:37
+It is it's this one is one of those things that security is doing some things with packages that are just they ref a lot of things thinking, oh, what we might just use one method from that, but it's it's not only considered on the whole what this what this does to large projects.
+
+1:03:51
+Now, if you notice something, though, if you look at our our projects, look at this list, look at how many of these are actually test projects that we don't ship to prod, right?
+
+1:04:02
+And it's actually most of these folders because of how they are output today.
+
+1:04:07
+So we'll move these tests around so that they're not so included like that and you actually shave some more gigs off the build output.
+
+1:04:17
+So we'll deal with that.
+
+1:04:18
+But This is why the stuff matters.
+
+1:04:19
+You're like, why?
+
+1:04:20
+Why am I getting flagged on CS project?
+
+1:04:23
+This type of stuff?
+
+1:04:24
+Also, if you take this project and you were to add this ref for server off to another project, same story.
+
+1:04:32
+It imports all of those things all in the way it's all transitive.
+
+1:04:35
+So anything refed all the way down, it all comes up.
+
+1:04:40
+This is why these things matter in terms of is there any questions around that like projects Nuggets?
+
+1:04:46
+It's it's a big old topic just by itself as to how the structure works.
+
+1:04:51
+You made a lot of context as to why we do something specific way.
+
+1:04:53
+I'm always happy to answer that and walk you through like your example or something else.
+
+1:04:59
+If you come to me asking about this kind of stuff, it is very productive.
+
+1:05:04
+And this is just general advice.
+
+1:05:05
+Bring your problem.
+
+1:05:06
+Don't.
+
+1:05:07
+You can bring your solution and that's fine, but bring your problem as well because the solution may be completely different than you thought of.
+
+1:05:13
+And always be open to that for anything you're dealing with.
+
+1:05:16
+Like when you're ever you're going to find an expert on X or Y always have your like, what problem are you trying to solve?
+
+1:05:22
+That should be the first thing that is asked.
+
+1:05:25
+A lot of times as engineers, sometimes we we skip that step and we're like, Hey, we have this awesome solution.
+
+1:05:30
+We're like, great to what?
+
+1:05:34
+That happens quite a bit.
+
+1:05:37
+OK, so the other question I get I wanted to to cover in here is BB TS.
+
+1:05:43
+People asked about how to right BB TS.
+
+1:05:47
+So Andre, for example, pinged me earlier today on billing.
+
+1:05:52
+There's an old billing project and we want to move it over to BB TS.
+
+1:05:56
+So again, start with the problem, not with the solution, right?
+
+1:06:00
+The thing we want to do is port the BB TS to the new place.
+
+1:06:04
+And like at the start of that conversation, we said, hey, how do I port these into Tom 2, right?
+
+1:06:09
+So the Tom 2 tests are where most of the BB TS live for various things, right?
+
+1:06:15
+And we run different versions or different not versions, slices of this thing based on cat.
+
+1:06:27
+So if you look at the category like E tag, it's got this category functional.
+
+1:06:32
+That's a functional test or a Linux functional is a Linux functional.
+
+1:06:36
+I'm sorry for the Linux crew, but way back before me, so I can't be blamed for this.
+
+1:06:41
+Is there's functional and then Linux came later.
+
+1:06:45
+So it's Linux functional, web worker, Linux web worker.
+
+1:06:48
+We don't have Windows web worker.
+
+1:06:50
+Life would be a little bit simpler if we had a prefix on both, but we don't test mirror that too.
+
+1:06:54
+So if you see like without a Linux prefix, assume Windows.
+
+1:06:58
+Basically these run on some CIS.
+
+1:07:03
+And I'm doing this live.
+
+1:07:04
+I haven't looked at the CI dashboard because I've been busy today.
+
+1:07:07
+Oh, that's not terrible.
+
+1:07:09
+OK, ACE V3 Oh yeah, Sergey, I see in the call I got an opinion about a cert issue.
+
+1:07:14
+Maybe possibly depending on this, this run completes.
+
+1:07:19
+So these CIS run different slices of tests.
+
+1:07:24
+And again, this is something we're very methodical about.
+
+1:07:25
+Which CIS are we running?
+
+1:07:28
+So another conversation this morning was with, so Sandeep on the control plane team is trying to roll out MWHA V2.
+
+1:07:37
+OK, so MWHA is Microsoft Web host administration.
+
+1:07:40
+This is on the controller role, the website that runs that gets the API commands from a Geo or ultimately routed for Asus.
+
+1:07:48
+It's handling those, all that kind of stuff.
+
+1:07:49
+It's the controller main API, right?
+
+1:07:52
+We're moving that to the core.
+
+1:07:54
+And the way we're doing that is putting it on a different port, running it side by side and shifting the traffic over the other one.
+
+1:08:01
+And if it fails, we can just point the traffic back.
+
+1:08:02
+That's the plan in dev.
+
+1:08:05
+We want to test this out and one of the, again, what problem are we trying to solve?
+
+1:08:10
+These CIS, their intent is to cover in testing decently.
+
+1:08:17
+We have a long way to go on good test coverage, but decently the scenarios that we see have seen broken whatever we can reasonably cover in all of the way, not just dev, right?
+
+1:08:30
+This is dev.
+
+1:08:31
+This is the release that's about to go out.
+
+1:08:33
+This is release that's rolling in the world now.
+
+1:08:35
+This case, there's two tests that are broken, which general also to fix this morning for.
+
+1:08:39
+Thank you for that on MI as we roll through SFI and they would where it's all this is a little bit of a mess to keep up with right now, but we're almost clean again.
+
+1:08:50
+We want to test the various permutations that we deploy.
+
+1:08:54
+Aces.
+
+1:08:55
+It used to be cloud service.
+
+1:08:56
+You notice this dashboard doesn't have cloud service anymore as of Monday or Friday or something.
+
+1:09:02
+I ripped it out.
+
+1:09:03
+So there's no more ASV 2.
+
+1:09:04
+There's no more cloud service Windows, no more cloud service Linux.
+
+1:09:07
+The SRE team should be very happy that that count of violations dropped a little bit as we deleted them off the CIS.
+
+1:09:14
+And thanks for a lot of you responding on deleting your old cloud service stuff.
+
+1:09:19
+That's we're down to like 83 classic resources in private out of 240 some 1000 news versus it's pretty good we're getting there.
+
+1:09:29
+So we don't need to cover that anymore.
+
+1:09:32
+So let's yank it out of the matrix for these.
+
+1:09:34
+What what I'm going to propose to for like Sandeep's case is to go for the Windows 2022 CIS and put V2 on these two because we're testing the others against VMSS up here.
+
+1:09:44
+This is testing when it's 2016.
+
+1:09:46
+This is testing when it's 2022, but that's orthogonal to the controller API bits.
+
+1:09:51
+But we can use.
+
+1:09:52
+We don't need to make another set of CI's.
+
+1:09:53
+There's cost to that, right?
+
+1:09:55
+There's a lot of different things in CI's that aren't apparent to folks, and they shouldn't be.
+
+1:09:59
+They should be something you have to think about.
+
+1:10:01
+They should just work.
+
+1:10:02
+You should care when they're red.
+
+1:10:05
+Where do you host them the quota for those things?
+
+1:10:07
+Because we do have CI subscriptions so that if you were to create ACI in your thing and you change teams or new people come in like ACI.
+
+1:10:15
+Being on a per dev subscription, not a good idea.
+
+1:10:17
+Any shared resource being on a dev subscription, not a good idea.
+
+1:10:21
+Having a test that depends on a resource that's in your subscription, equally bad idea.
+
+1:10:26
+So these are the things we want to coordinate and have in a shared place with shared ownership, responsibility, coverage, all these things, right?
+
+1:10:34
+It's like you want, do you want to be the only one on call when that thing breaks?
+
+1:10:38
+No, no one wants that, right?
+
+1:10:39
+So where we put these things, how we get quota for them, how we get exceptions for them.
+
+1:10:45
+So for example, when E US there, there are API, there are CIS in here that run in East US.
+
+1:10:50
+Regardless of the fact that most of the team, including me can't run anything in East US because these are shared, they're consolidated.
+
+1:10:58
+We can work with a capacity team to just get an exception for that one thing and relatively few cores.
+
+1:11:04
+We run on like 100 or 200 cores total across all these Subs in East US.
+
+1:11:09
+It's a very small allocation for them, but it keeps us up and running and we're not moving stamps continually as regions lose capacity because we do get kicked out of regions.
+
+1:11:18
+It's very easy or it's much easier for us to go to capacity and say, hey, add an exception for these few when R&D gets objected due to an incident, a sub 0 sub one in an area and that one of the levers they pull is they say kick out non prod subscriptions.
+
+1:11:35
+So non prod R&D, same thing here.
+
+1:11:38
+And all of those get de allocated.
+
+1:11:39
+You've gotten these emails right.
+
+1:11:40
+South Central US out of capacity E, US out of capacity E, US tube out of capacity West US.
+
+1:11:46
+Every US region has purged at some point in the last year, many, multiple times.
+
+1:11:50
+Australia E is currently our safe haven.
+
+1:11:55
+We hope it stays that way.
+
+1:11:57
+There are constraints to even those regions with IPS and things that we're dealing with, but all of that goes into CIS and where we put them, how we allocate them.
+
+1:12:06
+How do we reasonably cover the matrix of things that we want to test without having a bajillion CIS, which is a quota issue.
+
+1:12:16
+It's an arm, and it's not just quota for course, by the way, that's what people think about.
+
+1:12:20
+All of these CIS deploying right here are hitting ARM, and this Dev is actually split because Dev has more CIS.
+
+1:12:28
+Dev is split into two subscriptions When you hit ARM and you say, hey, but in the Azure and Torres deployment code, how many calls we make really matters in CIS more than anything else because there's so many neighbors.
+
+1:12:42
+So when you deploy a production stamp, you get one subscription, one stamp GOSGO, whatever.
+
+1:12:48
+And you're saying, hey, what storage accounts, what sequel?
+
+1:12:51
+And you get one sequel server back, You get one storage count back or a couple storage accounts.
+
+1:12:54
+Very low cardinality of things.
+
+1:12:57
+OK.
+
+1:12:58
+But in CIS it's a shared subscription and you're dev and you're you deploy and you have you have a couple of stamps, you get a couple things back.
+
+1:13:06
+Now at CI scale when you're running dozens of things in a subscription now you start hitting limits for a couple of things.
+
+1:13:13
+So what just helped me clear it up the other day, the there's a limit in the portal.
+
+1:13:20
+If you go to just go to the portal and I'll show you this, how many managed identity grants you can do.
+
+1:13:27
+Remember, we're all managed identity now, right?
+
+1:13:29
+Different roles have access to different containers or storage subscriptions, that kind of thing.
+
+1:13:34
+So if you go to subscriptions here, so pay no attention to the 1600.
+
+1:13:40
+So let's just go to a dev subscription and go to access control.
+
+1:13:44
+One of the things that's going to happen and this is you're like, hey, can I get access to the subscription?
+
+1:13:49
+No, I'm going to lock you out because you are all fantastic people who love to do the right thing and clean up things you're not supposed to be using.
+
+1:14:00
+That good behavior becomes a problem when you have access to other subscriptions.
+
+1:14:04
+You're like, oh, I don't recognize that anymore.
+
+1:14:06
+And we have had multiple incidents of people just cleaning up dev helpfully and just wrecking the CIS.
+
+1:14:11
+I have restored our SQL databases more than 0 times.
+
+1:14:15
+That's that's why just contact us, we'll create ACI.
+
+1:14:18
+That's that's there is me coordinate on this kind of thing, but see these role assignments.
+
+1:14:23
+We were doing a bad thing previously before being to some groups and we'd exhausted the 4000 NCIS.
+
+1:14:30
+This is one of many, many, many things.
+
+1:14:32
+You can only call the storage API an ARM so many times per 5 minutes before you run out of quota.
+
+1:14:37
+This is the kind of stuff that under load or doing spikes CIS can actually hit because there's so many stamps deploying.
+
+1:14:44
+So all of this feeds into being very methodical and careful about our test matrix and what we're doing.
+
+1:14:50
+So for example, if we burn through DB 3, I believe what is it CR21, those stamps are those are the last bastions of 2016 on Earth.
+
+1:15:03
+We will and we'll port Dev from 2016 to 2022 probably next week.
+
+1:15:08
+We'll send us some emails about this.
+
+1:15:09
+Have to work with Powell's team and Aditya on quota because again, the reason why I'm methodical, If you look at this and you say usage in quotas, you're going to see various quotas here used for a couple of things.
+
+1:15:25
+And we use currently A1 web Gen.
+
+1:15:27
+twos for most of your private subscriptions on 2016.
+
+1:15:31
+If you're opted into Gen.
+
+1:15:32
+2, you're on D2AV42 core boxes.
+
+1:15:36
+And we're doing some things to soften the blow for the spoof.
+
+1:15:39
+I'm trying to get them in place before you, before we, you know, make this move.
+
+1:15:44
+And those two things are Alex's change to make tests faster and waves change to make worker installs faster.
+
+1:15:51
+I covered these in the morning session, but basically parallel web Pi and tests that fake DNS.
+
+1:15:58
+Between those two things, we should shave something like 20 to 30 minutes off of most stampes, which would be pretty good gains.
+
+1:16:06
+So when we move from these over the A series, so if you look at these A webs or A2 web, just like a Gen.
+
+1:16:18
+2, so AV web, sorry, AV 2, Gen.
+
+1:16:21
+2, we're not using a whole lot of course, because due to long ago history things we're not on these.
+
+1:16:29
+We are in prod.
+
+1:16:32
+It had to do with bursting and discovering things in depth.
+
+1:16:35
+But this is the important part.
+
+1:16:37
+This right here is not adjustable for you.
+
+1:16:40
+This is something that we would hope would be solved, but unfortunately it's still not solved and there's no ETA on when it will be solved.
+
+1:16:46
+These internal only skews.
+
+1:16:50
+There is a plan that keeps getting de prioritized basically to make these adjustable in the portal for you as a dev.
+
+1:16:56
+But if I flip all of our cores from 1:00 to the other and your stamps are past this amount, it will be very painful because now you have to go support request, wait for it to go through it.
+
+1:17:08
+It should be approved.
+
+1:17:09
+But that's a long cycle to get back to green online, right?
+
+1:17:14
+Whereas if you look at the other quotas, I can just do it right here in the portal and get more course.
+
+1:17:21
+This is why we haven't moved.
+
+1:17:22
+You're like, hey, why are we still not on 2022?
+
+1:17:24
+We have to go through this exercise.
+
+1:17:26
+We need to go see who's using what quota, see who needs it, try and do those requests for you in the background or something.
+
+1:17:35
+We're working through all of this.
+
+1:17:36
+So if you're curious, like why won't we just move?
+
+1:17:38
+There's a lot of logistics in making it something that you don't care about.
+
+1:17:43
+The best, the best compliment I ever got as an SRE was we did a, sorry, we did an upgrade at, at Stack Overflow.
+
+1:17:51
+We replaced the databases, the web tier, the core infrastructure, switching to Nexus 6596, UPS and some other things over a couple of days in the data center.
+
+1:18:03
+And we just replaced everything while it was running online.
+
+1:18:07
+And we go back to the office and the other half of the IT team, which is ran the offices and for employees and everything said we didn't know you were doing anything.
+
+1:18:15
+Yes, that's the best compliment you can get is an SRE.
+
+1:18:18
+That's what we hope to aim for in a lot of these moves for underlying infrastructure.
+
+1:18:22
+You should not hit errors.
+
+1:18:24
+If we did, if you are hitting it, we didn't do a good job.
+
+1:18:29
+So in that's planning phase of this on BB TS, the reason I tangent on that for a minute is there's two places we actually run BB TS.
+
+1:18:41
+There's Geo region service tests.
+
+1:18:43
+So when Andre paying me the bill, the billing, billing runs on GRS and GO, it needs Agrs and it runs on GO and it runs on a stamp.
+
+1:18:53
+So to test all the different tests to keep in one place, it really belongs in here, not Tom too for where the home goes.
+
+1:19:02
+Now, do we run on its own CI for like CI billing maybe Billings very important.
+
+1:19:06
+It may be good to isolate it.
+
+1:19:08
+We may run it on CIGRS.
+
+1:19:09
+We'll figure it out.
+
+1:19:10
+But the first step is just getting any tests running and getting them in here.
+
+1:19:14
+They were.
+
+1:19:15
+They exist in this old project up here, but we'll bring them down.
+
+1:19:19
+So these are the kind of things that we consider when you're adding tests.
+
+1:19:21
+Feel free to ping me, say like, hey, where's the best place for this because it might just save you pain.
+
+1:19:26
+But in terms of writing BB TS, a lot of it is copying something that's there.
+
+1:19:31
+So let's say feature test is a very good place to start, I would say when you're looking.
+
+1:19:37
+So if you look for like basic smoke smoke test, basic smoke, like here's basic smoke Linux for example, right?
+
+1:19:48
+What this is doing is creating a scenario, the Linux website scenario, and this spins up a website for you on the OR it gets the settings in all for you.
+
+1:19:59
+What actually spins up the website is this a range and it says, hey, I need a worker, a small worker, a reserve.
+
+1:20:04
+Sometimes you don't need a worker.
+
+1:20:05
+You're just testing an API.
+
+1:20:07
+You're testing somebody doesn't need a site.
+
+1:20:09
+That's fine too.
+
+1:20:10
+If you don't need a worker, do not use a worker.
+
+1:20:12
+Worker is the number one reason tests are slow because reserving a worker.
+
+1:20:17
+Means only one test can run on that worker at once.
+
+1:20:19
+And we can.
+
+1:20:20
+It's a balance.
+
+1:20:21
+Again, all of this is planning balance between how many concurrent workers everybody has to deploy to run the basic test suite for APR and how many concurrent tests we can run at once.
+
+1:20:33
+So the longer the more tests that use a worker or the longer they use a worker, the longer the overall test run decks tests spin and wait for a worker.
+
+1:20:42
+So what this is doing is simply making a website with one small worker doing a no op on it, and then it's just asserting that the site exists and then down.
+
+1:20:52
+In the end these are reusable assertions.
+
+1:20:55
+We can collapse these files a little bit.
+
+1:20:57
+I'll do a pass at this.
+
+1:20:58
+But This site is just looking through and pinging the control plane, checking the exists, coming back, but riding ABBT.
+
+1:21:05
+You can start with generally the basic smoke test for Linux or Windows and add what you need to add in a BBT.
+
+1:21:15
+You should first ask should your test be a BBT is an end to end test.
+
+1:21:20
+Can it be unit tested would be fantastic because we can run that on every PR we can run on every build.
+
+1:21:25
+Unit test should be very fast.
+
+1:21:28
+If it's an integration test, we actually don't have a lot of these cases.
+
+1:21:31
+If you have cases for integration tests like I connected this other API or deal with this thing that is some kind of resource, I can't run a unit test.
+
+1:21:39
+I couldn't run it with the Ethernet cable unplugged basically, or Wi-Fi off for the, you know, anybody on that situation.
+
+1:21:47
+So you integration tests need connectivity in some way.
+
+1:21:52
+Generally speaking, that's how integration tests tend to work against the server, against the storage, against service bus, something like that.
+
+1:21:59
+If you have integration tests that don't need a worker to run, ping me.
+
+1:22:03
+We don't have enough of these to actually reason about what that should look like, but it is something I'm happy to add and figure out.
+
+1:22:10
+And one of the things that again, we figure out with all of these bits is all of these test folders, our dupe.
+
+1:22:17
+Look at these hundreds of megs, right?
+
+1:22:18
+20 Meg, 60 Meg, 120 Meg, 168 megs.
+
+1:22:22
+It's a lot of storage and a lot of this is repeated.
+
+1:22:25
+It's this, we don't use that many distinct libraries.
+
+1:22:28
+So creating a unit test project for everything, also not the way to go.
+
+1:22:32
+Takes more time to build, takes more time to copy every build artefact that we produce in officials and everything else.
+
+1:22:38
+It has to look at these, has to scan these, has to upload this to Cloud Vault.
+
+1:22:43
+Again, reasons for everything we do with efficiency.
+
+1:22:45
+So talk to me and we'll figure out where those tests go.
+
+1:22:49
+My job is to get you set up to write your first one or your first area and then you go off and running with that and again, look at your Co pilots for those sort of things for writing a test.
+
+1:23:00
+You can also say it can look at the BB TS.
+
+1:23:03
+Actually, let's just see this real quick.
+
+1:23:04
+I am curious because I have not tried this.
+
+1:23:10
+I don't think it would do a good job with this, but let's check.
+
+1:23:14
+Is that a BBT 4 based on basic?
+
+1:23:29
+I'm just curious because it gets better and better as I tested each month for this and this was something I gave the team feedback on.
+
+1:23:35
+But writing tests, Liz said in this session earlier it's really good for that specifically, especially unit tests BBTS.
+
+1:23:44
+Let's see.
+
+1:23:50
+OK, assert response and it is just adding a ping assertion.
+
+1:24:01
+This actually wrote completely the correct thing.
+
+1:24:05
+So if you wanted to tell, OK, somebody give an example like, OK, let's see, let's see, let's see.
+
+1:24:24
+I'm just beating it a test case.
+
+1:24:26
+So if what you're testing is like site disablement or removement or removement, that's not a word, then what would it look like?
+
+1:24:33
+And I'm just curious what this does.
+
+1:24:36
+Does it because it knows our AP is it has crawled through OK, site delete action, which I'm assuming.
+
+1:24:43
+And by the way, you can, you can preview this, you can write it.
+
+1:24:46
+You can also ask in line over here, ask or key bindings are not if your Visual Studio has been installed for a while, it's not that yeah, it's going to delete that exact website.
+
+1:24:59
+So this would actually is negative test.
+
+1:25:08
+So this would be a new BBB, for example.
+
+1:25:11
+Now the value of this we would need to see about.
+
+1:25:17
+So it's, see in this case, it's like, hey, this is sometimes it'll imagine an API, right.
+
+1:25:23
+One of the things that I talked to some folks about is like the things that are, this is a hallucination.
+
+1:25:30
+The things that are hallucinated, if it hallucinated them a lot and devs tried to use it, it's actually a decent signal indicator that that's an API that they are wanting or missing.
+
+1:25:40
+In this case, I would argue that this is actually an API that you would might actually want to go add right site Ping assertion doesn't have anything right now, but we can add a failure case into this of that it's that it does fail to ping in here and that'd be a good way to do that test.
+
+1:25:57
+But the basics are written for you and then you're going down and just editing BBT's.
+
+1:26:02
+Generally you want to be testing a robust end to end scenario, something that's important because we are constrained on resources.
+
+1:26:11
+If folks have ideas or testing of how to speed these up, I'm all for it.
+
+1:26:16
+It's all a matter of time allocation, but that's the end to end testing.
+
+1:26:20
+The main thing I would tell you is look at the smoke test is just your very, very basics for this stuff and then or look at a test that does something similar to what you want.
+
+1:26:29
+Either extend that test if it makes sense and also cover your thing along the way or do a different.
+
+1:26:37
+The scenario of that and where we run it is going to be based on these categories that'll appear, which CI it's on and whether it runs.
+
+1:26:44
+Be very careful when you're adding literally this.
+
+1:26:47
+So when you're adding BBT, this literally runs on every Stampy or Linux BBT runs on every Stampy that every dev runs.
+
+1:26:56
+So your test needs to be a rock solid before it graduates to that.
+
+1:27:00
+And if it's using a worker, keep in mind that it's contending with all the other tests.
+
+1:27:04
+So this one still has some isms.
+
+1:27:07
+Feel free to ping me.
+
+1:27:08
+I can help you out with this.
+
+1:27:11
+But hopefully that helps.
+
+1:27:12
+I know that people had that question about like where do I even look to start with this?
+
+1:27:16
+This is it.
+
+1:27:17
+Look at it happy answer more questions.
+
+1:27:23
+So I will stop session there.
+
+1:27:25
+If anyone has questions about any of that stuff or anything is normal, just ping me on the side or tomorrow and I'm happy to help you out.
+
+1:27:32
+Hopefully you learned at least a couple of things and I will see you next time.

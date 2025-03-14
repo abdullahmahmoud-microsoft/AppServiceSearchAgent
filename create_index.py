@@ -29,7 +29,6 @@ def generate_index_name(url_or_identifier):
     slug = url_or_identifier.replace("https://", "").replace("http://", "").replace("_", "-").lower()
     slug = re.sub(r'[^a-z0-9-]', '-', slug)
     slug = re.sub(r'-+', '-', slug).strip('-')
-    # Generate a hash for uniqueness
     h = hashlib.md5(url_or_identifier.encode()).hexdigest()
     return f"{slug[:60]}-{h[:8]}"
 
@@ -37,17 +36,27 @@ def generate_valid_id(url_or_identifier, doc_index):
     index_name = generate_index_name(url_or_identifier)
     return f"{index_name}-{doc_index}"
 
-def split_text(text, chunk_size=3000):
-    return [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
+def split_text_with_overlap(text, chunk_size=3000, overlap=300):
+    """
+    Split text into chunks with a specified overlap between chunks.
+    """
+    chunks = []
+    start = 0
+    text_length = len(text)
+    while start < text_length:
+        end = start + chunk_size
+        chunk = text[start:end]
+        chunks.append(chunk)
+        # Move start to the end minus the overlap (if possible)
+        start = end - overlap if end < text_length else text_length
+    return chunks
 
 def scrape_authenticated_page(url):
     options = webdriver.EdgeOptions()
     driver = webdriver.Edge(options=options, service=EdgeService(EdgeChromiumDriverManager().install()))
     driver.get(url)
     try:
-        WebDriverWait(driver, 20).until(
-            lambda d: d.find_element(By.ID, "_content")
-        )
+        WebDriverWait(driver, 20).until(lambda d: d.find_element(By.ID, "_content"))
     except Exception as e:
         print("Warning: Main content not detected; proceeding anyway.", e)
     html = driver.page_source
@@ -55,12 +64,10 @@ def scrape_authenticated_page(url):
     return html
 
 def extract_title(html):
-    from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, 'html.parser')
     return soup.title.get_text().strip() if soup.title else ""
 
 def extract_main_content(html):
-    from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, 'html.parser')
     article = soup.find('article', id="_content")
     if article:
@@ -73,7 +80,6 @@ def extract_main_content(html):
         return "\n".join(texts) if texts else soup.get_text(separator="\n").strip()
 
 def extract_sections_from_article(html):
-    from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, 'html.parser')
     article = soup.find('article', id="_content")
     sections = []
@@ -84,11 +90,9 @@ def extract_sections_from_article(html):
         if h2_containers:
             for i, container in enumerate(h2_containers):
                 h_heading = container.find(['h1','h2','h3','h4','h5','h6'])
+                sec_title = h_heading.get_text(strip=True) if h_heading else f"Section {i+1}"
                 if h_heading:
-                    sec_title = h_heading.get_text(strip=True)
                     h_heading.decompose()
-                else:
-                    sec_title = f"Section {i+1}"
                 sec_content = container.get_text(separator="\n", strip=True)
                 sections.append({"title": sec_title, "content": sec_content})
         else:
@@ -122,7 +126,6 @@ def extract_sections_from_article(html):
     return sections
 
 def generate_qa_pairs(text_chunk, identifier, max_retries=3):
-    # Calculate target number of pairs based on text length
     target = max(10, min(50, int(len(text_chunk) / 1000))) * 2
     prompt = (
         "You are called Antares Genie, an expert in engineering support for the Azure App Service Team led by Bilal Alam. "
@@ -202,105 +205,96 @@ def generate_qa_pairs(text_chunk, identifier, max_retries=3):
     print("Max retries reached for", identifier)
     return []
 
+def clean_transcript_text(raw_text):
+    cleaned = re.sub(r'\d+:\d+:\d+|\d+:\d+', '', raw_text)
+    cleaned = re.sub(r'^[A-Za-z][A-Za-z0-9\s]*:', '', cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
+
+def enhance_text_via_ai(text, identifier, max_retries=3):
+    prompt = (
+        "You are an AI assistant that improves text by correcting grammar, punctuation, and filling in missing words based on context, "
+        "without altering the original meaning. Improve the following text and return the result as plain text:\n\n" + text
+    )
+    headers = {"Content-Type": "application/json", "api-key": OPENAI_API_KEY}
+    data = {
+        "model": DEPLOYMENT_NAME,
+        "messages": [
+            {"role": "system", "content": "You are an assistant that cleans up text."},
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": 4000
+    }
+    attempt = 0
+    while attempt < max_retries:
+        response = requests.post(OPENAI_ENDPOINT, headers=headers, json=data)
+        if response.status_code == 429:
+            wait_time = 21
+            try:
+                error_msg = response.json().get("error", {}).get("message", "")
+                match = re.search(r"after (\d+) seconds", error_msg)
+                if match:
+                    wait_time = int(match.group(1))
+            except Exception:
+                pass
+            print(f"Rate limit exceeded (enhancement). Waiting for {wait_time} seconds...")
+            time.sleep(wait_time)
+            attempt += 1
+            continue
+        try:
+            response_json = response.json()
+            improved_text = response_json.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            return improved_text
+        except Exception as e:
+            print("Error enhancing text via AI:", e)
+            attempt += 1
+    print("Max retries reached for text enhancement", identifier)
+    return text
+
 def create_or_replace_index(service_name, admin_key, index_name):
+    """
+    Create an index tailored for transcript and URL content.
+    This schema includes documents for:
+      - Q&A pairs (doc_type: "qa")
+      - Raw content chunks (doc_type: "content")
+    The semantic configuration prioritizes the 'title' field (if available) and 'content' field.
+    """
     url = f"https://{service_name}.search.windows.net/indexes/{index_name}?api-version={API_VERSION}"
     headers = {"Content-Type": "application/json", "api-key": admin_key}
     
     fields = [
-        {
-            "name": "id",
-            "type": "Edm.String",
-            "searchable": True,
-            "filterable": True,
-            "retrievable": True,
-            "sortable": True,
-            "facetable": True,
-            "key": True,
-            "synonymMaps": []
-        },
-        {
-            "name": "doc_type",
-            "type": "Edm.String",
-            "searchable": True,
-            "filterable": True,
-            "retrievable": True,
-            "sortable": False,
-            "facetable": False,
-            "key": False,
-            "synonymMaps": []
-        },
-        {
-            "name": "page_title",
-            "type": "Edm.String",
-            "searchable": True,
-            "filterable": True,
-            "retrievable": True,
-            "sortable": True,
-            "facetable": False,
-            "key": False,
-            "synonymMaps": []
-        },
-        {
-            "name": "title",
-            "type": "Edm.String",
-            "searchable": True,
-            "filterable": True,
-            "retrievable": True,
-            "sortable": True,
-            "facetable": True,
-            "key": False,
-            "synonymMaps": []
-        },
-        {
-            "name": "content",
-            "type": "Edm.String",
-            "searchable": True,
-            "filterable": True,
-            "retrievable": True,
-            "sortable": True,
-            "facetable": True,
-            "key": False,
-            "synonymMaps": []
-        },
-        {
-            "name": "file_name",
-            "type": "Edm.String",
-            "searchable": True,
-            "filterable": True,
-            "retrievable": True,
-            "sortable": True,
-            "facetable": True,
-            "key": False,
-            "synonymMaps": []
-        },
-        {
-            "name": "upload_date",
-            "type": "Edm.DateTimeOffset",
-            "searchable": False,
-            "filterable": True,
-            "retrievable": True,
-            "sortable": True,
-            "facetable": True,
-            "key": False,
-            "synonymMaps": []
-        }
+        {"name": "id", "type": "Edm.String", "searchable": True, "filterable": True,
+         "retrievable": True, "sortable": True, "facetable": True, "key": True, "synonymMaps": []},
+        {"name": "doc_type", "type": "Edm.String", "searchable": True, "filterable": True,
+         "retrievable": True, "sortable": False, "facetable": False, "key": False, "synonymMaps": []},
+        {"name": "page_title", "type": "Edm.String", "searchable": True, "filterable": True,
+         "retrievable": True, "sortable": True, "facetable": False, "key": False, "synonymMaps": []},
+        {"name": "title", "type": "Edm.String", "searchable": True, "filterable": True,
+         "retrievable": True, "sortable": True, "facetable": True, "key": False, "synonymMaps": []},
+        {"name": "content", "type": "Edm.String", "searchable": True, "filterable": True,
+         "retrievable": True, "sortable": False, "facetable": False, "key": False, "synonymMaps": []},
+        {"name": "file_name", "type": "Edm.String", "searchable": True, "filterable": True,
+         "retrievable": True, "sortable": True, "facetable": True, "key": False, "synonymMaps": []},
+        {"name": "upload_date", "type": "Edm.DateTimeOffset", "searchable": False, "filterable": True,
+         "retrievable": True, "sortable": True, "facetable": True, "key": False, "synonymMaps": []}
     ]
+    
+    # Semantic configuration that prioritizes the title and content fields.
+    semantic_config = {
+        "configurations": [
+            {"name": "default",
+             "prioritizedFields": {
+                 "titleField": {"fieldName": "title"},
+                 "prioritizedContentFields": [{"fieldName": "content"}],
+                 "prioritizedKeywordsFields": []}
+             }
+        ]
+    }
     
     index_definition = {
         "name": index_name,
         "fields": fields,
-        "semantic": {
-            "configurations": [
-                {
-                    "name": "default",
-                    "prioritizedFields": {
-                        "titleField": {"fieldName": "file_name"},
-                        "prioritizedContentFields": [{"fieldName": "content"}],
-                        "prioritizedKeywordsFields": []
-                    }
-                }
-            ]
-        },
+        "semantic": semantic_config,
         "scoringProfiles": [],
         "suggesters": [],
         "analyzers": [],
@@ -331,11 +325,16 @@ def upload_documents(service_name, admin_key, index_name, documents):
     search_client = SearchClient(endpoint=endpoint, index_name=index_name, credential=credential)
     results = search_client.upload_documents(documents=documents)
     print(f"Uploaded {len(documents)} documents to index {index_name}")
+    print("Upload results:", results)
     return results
 
-# If running this file independently, you can test functions here.
+# Main execution starts here.
 if __name__ == "__main__":
-
+    # ---------------------------
+    # Process URLs (if any)
+    # ---------------------------
+    url_documents = []
+    doc_index = 0
     urls = [
         "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/deploymentteamdocs/do-upgrade",
         "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/raregionexpansion",
@@ -358,24 +357,24 @@ if __name__ == "__main__":
         "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/deploymentteamdocs/antreleasestopandstartcriteria",
         "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/generalteamdocs/documentation/sdp/sdp",
         "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/quotaincreases",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/groupquota",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/skucoremappings",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/skuavailability",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/raregionexpansion",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/ase/asebuildout",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/ase/asecapacity",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/ase/selfservease",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/stamps/newstampbuildouts",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/stamps/stampscapacitydata",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/stamps/stampstateaciscommands",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/stamps/stompupgradedeploymentblockers",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/falconteamdocs/testing/rdp/rdptovmss",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/generalteamdocs/documentation/telemetry/telemetry",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/generalteamdocs/documentation/telemetry/telemetrytroubleshooting",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/generalteamdocs/documentation/telemetry/microsoftwebhostingtracing",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/generalteamdocs/documentation/telemetry/kustogds",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/generalteamdocs/documentation/telemetry/lockdowngenevatables",
-        "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/generalteamdocs/documentation/telemetry/platformtelemetryoncall/telemetrychecklist",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/groupquota",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/skucoremappings",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/skuavailability",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/raregionexpansion",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/ase/asebuildout",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/ase/asecapacity",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/ase/selfservease",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/stamps/newstampbuildouts",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/stamps/stampscapacitydata",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/stamps/stampstateaciscommands",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/capacityteamdocs/stamps/stompupgradedeploymentblockers",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/falconteamdocs/testing/rdp/rdptovmss",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/generalteamdocs/documentation/telemetry/telemetry",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/generalteamdocs/documentation/telemetry/telemetrytroubleshooting",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/generalteamdocs/documentation/telemetry/microsoftwebhostingtracing",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/generalteamdocs/documentation/telemetry/kustogds",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/generalteamdocs/documentation/telemetry/lockdowngenevatables",
+        # "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/generalteamdocs/documentation/telemetry/platformtelemetryoncall/telemetrychecklist",
         "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/generalteamdocs/documentation/kusto/kustoclusterinfo",
         "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/generalteamdocs/documentation/kusto/kustotablesoverview",
         "https://eng.ms/docs/cloud-ai-platform/devdiv/serverless-paas-balam/serverless-paas-vikr/app-service-web-apps/app-service-team-documents/generalteamdocs/documentation/kusto/kustotabledocumentation/antaresclouddeploymentevents",
@@ -409,45 +408,80 @@ if __name__ == "__main__":
         if html:
             page_title = extract_title(html)
             main_content = extract_main_content(html)
-            if main_content:
-                sections = extract_sections_from_article(html)
-                qa_pairs = generate_qa_pairs(main_content, url)
-                documents = []
-                doc_index = 0
-                for section in sections:
-                    sec_title = section.get("title", "").strip() or f"Section {doc_index+1}"
-                    sec_content = section.get("content", "").strip()
-                    if not sec_content:
-                        continue
-                    doc = {
-                        "id": generate_valid_id(url, doc_index),
-                        "doc_type": "section",
-                        "page_title": page_title,
-                        "title": sec_title,
-                        "content": sec_content,
-                        "file_name": url,
-                        "upload_date": datetime.now(timezone.utc).isoformat()
-                    }
-                    documents.append(doc)
-                    doc_index += 1
-                for qa in qa_pairs:
-                    if not isinstance(qa, dict):
-                        continue
-                    question = " ".join(qa.get("question", "").split())
-                    answer = " ".join(qa.get("answer", "").split())
-                    if not question or not answer:
-                        continue
-                    doc = {
-                        "id": generate_valid_id(url, doc_index),
-                        "doc_type": "qa",
-                        "page_title": page_title,
-                        "title": question,
-                        "content": f"Question: {question}\nAnswer: {answer}",
-                        "file_name": url,
-                        "upload_date": datetime.now(timezone.utc).isoformat()
-                    }
-                    documents.append(doc)
-                    doc_index += 1
-                index_name_final = generate_index_name(url)
-                create_or_replace_index(SEARCH_SERVICE_NAME, ADMIN_KEY, index_name_final)
-                upload_documents(SEARCH_SERVICE_NAME, ADMIN_KEY, index_name_final, documents)
+            # Generate Q&A pairs from the main content
+            qa_pairs = generate_qa_pairs(main_content, url)
+            # Create documents for Q&A pairs
+            for qa in qa_pairs:
+                if not isinstance(qa, dict):
+                    continue
+                question = " ".join(qa.get("question", "").split())
+                answer = " ".join(qa.get("answer", "").split())
+                if not question or not answer:
+                    continue
+                doc = {
+                    "id": generate_valid_id(url, doc_index),
+                    "doc_type": "qa",
+                    "page_title": page_title,
+                    "title": question,
+                    "content": f"Question: {question}\nAnswer: {answer}",
+                    "file_name": url,
+                    "upload_date": datetime.now(timezone.utc).isoformat()
+                }
+                url_documents.append(doc)
+                doc_index += 1
+            
+            # Also split the raw content (full text from HTML) into chunks with overlap
+            content_chunks = split_text_with_overlap(main_content, chunk_size=3000, overlap=300)
+            for idx, chunk in enumerate(content_chunks):
+                doc = {
+                    "id": generate_valid_id(url, f"content-{idx}"),
+                    "doc_type": "content",
+                    "page_title": page_title,
+                    "title": f"{page_title} - Content Part {idx+1}",
+                    "content": chunk,
+                    "file_name": url,
+                    "upload_date": datetime.now(timezone.utc).isoformat()
+                }
+                url_documents.append(doc)
+                doc_index += 1
+            
+            index_name_final = generate_index_name(url)
+            create_or_replace_index(SEARCH_SERVICE_NAME, ADMIN_KEY, index_name_final)
+            upload_documents(SEARCH_SERVICE_NAME, ADMIN_KEY, index_name_final, url_documents)
+    
+    # ---------------------------
+    # Process Meeting Transcript .txt files
+    # ---------------------------
+    transcript_documents = []
+    transcript_folder = "Meeting Transcripts"
+    transcript_files = [f for f in os.listdir(transcript_folder) if f.endswith(".txt")]
+    print(f"Found {len(transcript_files)} transcript file(s) in '{transcript_folder}'.")
+    
+    for filename in transcript_files:
+        filepath = os.path.join(transcript_folder, filename)
+        with open(filepath, 'r', encoding='utf-8') as f:
+            raw_transcript = f.read()
+        cleaned_text = clean_transcript_text(raw_transcript)
+        chunks = split_text_with_overlap(cleaned_text, chunk_size=3000, overlap=300)
+        print(f"Transcript '{filename}' split into {len(chunks)} chunk(s) with overlap.")
+        for idx, chunk in enumerate(chunks):
+            print(f"Enhancing chunk {idx+1}/{len(chunks)} for {filename} (length: {len(chunk)})...")
+            improved_chunk = enhance_text_via_ai(chunk, f"{filename}-chunk{idx}")
+            if not improved_chunk:
+                print(f"Warning: Chunk {idx+1} for {filename} returned empty result.")
+                continue
+            doc = {
+                "id": generate_valid_id(filename, f"{idx}"),
+                "doc_type": "transcript_chunk",
+                "page_title": filename,
+                "title": f"{filename} - Part {idx+1}",
+                "content": improved_chunk,
+                "file_name": filename,
+                "upload_date": datetime.now(timezone.utc).isoformat()
+            }
+            transcript_documents.append(doc)
+    
+    print(f"Total transcript chunk documents to upload: {len(transcript_documents)}")
+    transcript_index_name = generate_index_name("meeting-transcripts")
+    create_or_replace_index(SEARCH_SERVICE_NAME, ADMIN_KEY, transcript_index_name)
+    upload_documents(SEARCH_SERVICE_NAME, ADMIN_KEY, transcript_index_name, transcript_documents)
