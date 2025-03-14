@@ -121,10 +121,6 @@ def store_conversation(user_id, conversation_history):
 def alive():
     return "Antares Genie is ALLIIVEEEEEE."
 
-@app.route("/api/messages", methods=["GET"])
-def messages_get():
-    return jsonify({"message": "This endpoint accepts POST requests only."}), 405
-
 @app.route("/api/messages", methods=["POST"])
 def messages():
     req = request.get_json()
