@@ -8,9 +8,9 @@ from dotenv import load_dotenv
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
-from botbuilder.integration.aiohttp import ConfigurationBotFrameworkAuthentication
-from botbuilder.core import TurnContext, MessageFactory
+from botbuilder.core import TurnContext, MessageFactory, CloudAdapter
 from botbuilder.schema import Activity
+from botbuilder.integration.aiohttp import ConfigurationBotFrameworkAuthentication
 
 # Load settings
 load_dotenv()
@@ -36,32 +36,37 @@ def query_search_indices(query):
     results = []
     for index in INDICES:
         client = SearchClient(endpoint, index, credential)
-        hits = client.search(search_text=query, top=5, semantic_configuration_name="default", search_fields=["title","content"])
+        hits = client.search(search_text=query, top=5, semantic_configuration_name="default", search_fields=["title", "content"])
         for r in hits:
-            title = r.get("title","No Title")
-            content = r.get("content","")
+            title = r.get("title", "No Title")
+            content = r.get("content", "")
             if content:
                 results.append(f"[{index}] {title}: {content}")
     return results
 
 def generate_response(messages):
-    headers = {"Content-Type":"application/json","api-key":OPENAI_API_KEY}
-    payload = {"model":DEPLOYMENT_NAME, "messages":messages, "max_tokens":1000}
+    headers = {"Content-Type": "application/json", "api-key": OPENAI_API_KEY}
+    payload = {"model": DEPLOYMENT_NAME, "messages": messages, "max_tokens": 1000}
     resp = requests.post(OPENAI_ENDPOINT, headers=headers, json=payload).json()
-    return resp.get("choices",[{}])[0].get("message",{}).get("content","")
+    return resp.get("choices", [{}])[0].get("message", {}).get("content", "")
 
 from create_index import generate_qa_pairs, create_or_replace_index, upload_documents
 
 def store_conversation(user_id, history):
-    convo = "\n".join(f"{role.capitalize()}: {msg}" for role,msg in history)
+    convo = "\n".join(f"{role.capitalize()}: {msg}" for role, msg in history)
     qa_pairs = generate_qa_pairs(convo, f"conversation-{user_id}")
-    docs=[]
-    for i,qa in enumerate(qa_pairs):
-        q,a = qa.get("question","").strip(), qa.get("answer","").strip()
+    docs = []
+    for i, qa in enumerate(qa_pairs):
+        q, a = qa.get("question", "").strip(), qa.get("answer", "").strip()
         if q and a:
             docs.append({
-                "id":f"{user_id}-{i}", "doc_type":"qa", "page_title":f"Conversation {user_id}",
-                "title":q, "content":f"Q: {q}\nA: {a}", "file_name":f"conversation-{user_id}", "upload_date":time.strftime("%Y-%m-%dT%H:%M:%SZ")
+                "id": f"{user_id}-{i}",
+                "doc_type": "qa",
+                "page_title": f"Conversation {user_id}",
+                "title": q,
+                "content": f"Q: {q}\nA: {a}",
+                "file_name": f"conversation-{user_id}",
+                "upload_date": time.strftime("%Y-%m-%dT%H:%M:%SZ")
             })
     index_name = f"conversation-{user_id}".lower()
     create_or_replace_index(SEARCH_SERVICE_NAME, ADMIN_KEY, index_name)
@@ -70,7 +75,9 @@ def store_conversation(user_id, history):
 
 # Flask + Bot Framework setup
 app = Flask(__name__)
-auth = ConfigurationBotFrameworkAuthentication()
+
+# Authentication using the from_configuration method which automatically handles MSI or App ID and Password
+auth = ConfigurationBotFrameworkAuthentication.from_configuration()
 adapter = CloudAdapter(auth)
 
 async def on_turn(context: TurnContext):
@@ -85,7 +92,7 @@ async def on_turn(context: TurnContext):
         return
 
     history.append(("user", text))
-    messages = [{"role":r,"content":c} for r,c in history]
+    messages = [{"role": r, "content": c} for r, c in history]
     reply = generate_response(messages)
     history.append(("assistant", reply))
 
@@ -96,12 +103,12 @@ async def on_turn(context: TurnContext):
 
 @app.route("/api/messages", methods=["POST"])
 def messages():
-    if request.headers.get("Content-Type","").startswith("application/json"):
+    if request.headers.get("Content-Type", "").startswith("application/json"):
         body = request.json
     else:
         return Response(status=415)
     activity = Activity().deserialize(body)
-    auth_header = request.headers.get("Authorization","")
+    auth_header = request.headers.get("Authorization", "")
     task = adapter.process_activity(activity, auth_header, on_turn)
     asyncio.get_event_loop().run_until_complete(task)
     return Response(status=201)
@@ -111,4 +118,4 @@ def alive():
     return "Antares Genie is ALLIIVEEEEEE."
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT",3978)))
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 3978)))
