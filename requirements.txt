@@ -1,13 +1,20 @@
-# Needed for deploying to App Service
+# Azure SDK
+azure-storage-blob>=12.14.0
+azure-core>=1.31.1
+azure-identity>=1.14.0
+azure-search-documents>=11.9.0
 
-azure-storage-blob
-azure-core
-azure-identity
-azure-search-documents
-PyMuPDF
-beautifulsoup4
-selenium
-webdriver_manager
-python-dotenv
-flask
-gunicorn
+# Bot Framework (Python >=3.8 required)
+botbuilder-core==4.16.2
+botbuilder-integration-aiohttp==4.16.2
+
+# PDF / scraping / automation
+PyMuPDF>=1.23.0
+beautifulsoup4>=4.12.2
+selenium>=4.9.0
+webdriver-manager>=4.1.0
+
+# Config & Web
+python-dotenv>=1.0.0
+flask>=2.3.2
+gunicorn>=20.1.0

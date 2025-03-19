@@ -12,7 +12,10 @@ packages = [
     "selenium",
     "webdriver_manager",
     "python-dotenv",
-    "flask"
+    "flask",
+    "botbuilder-core",
+    "botbuilder-schema",
+    "requests"
 ]
 
 def install_packages(packages):
