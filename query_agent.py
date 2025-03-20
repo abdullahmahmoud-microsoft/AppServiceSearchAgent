@@ -56,8 +56,12 @@ def get_access_token():
 class MSIAppCredentials(MicrosoftAppCredentials):
     def __init__(self):
         super().__init__(MICROSOFT_APP_ID, None)
-        self._token = get_access_token()
+        # Ensure caller_id is set on the credentials object.
+        self.caller_id = MICROSOFT_APP_ID
 
+    def get_access_token(self, force_refresh: bool = False) -> str:
+        # Retrieve and return the token using your get_access_token() function.
+        return get_access_token()
 
 # Create BotFramework Authentication Configuration
 CONFIG = {
@@ -68,7 +72,8 @@ CONFIG = {
 
 # Initialize CloudAdapter
 adapter = CloudAdapter(ConfigurationBotFrameworkAuthentication(CONFIG))
-adapter.credentials = MSIAppCredentials()
+##adapter.credentials = MSIAppCredentials()
+##logger.info(f"Adapter credentials: {vars(adapter.credentials)}")
 
 async def on_error(context: TurnContext, error: Exception):
     logger.error(f"[on_turn_error] Unhandled error: {error}")
