@@ -133,36 +133,31 @@ def store_conversation(user_id, history):
 app = Flask(__name__)
 
 async def on_turn(context: TurnContext):
-    try:
-        user_id = context.activity.from_property.id or "unknown"
-        text = (context.activity.text or "").strip()
+    activity_type = context.activity.type
+    if activity_type == "conversationUpdate":
+        # Optionally, send a welcome message or simply ignore the event
+        logger.info("Received conversationUpdate event")
+        await context.send_activity("Welcome to the bot!")
+        return
 
-        logger.info(f"Received message from user {user_id}: {text}")
-
-        history = session_history.setdefault(user_id, [])
-        if re.search(r"store\s+.*(knowledge base|index)", text, re.IGNORECASE):
-            logger.info(f"User {user_id} requested to store conversation.")
-            ok = store_conversation(user_id, history)
-            session_history[user_id] = []
-            await context.send_activity(MessageFactory.text("Stored!" if ok else "Store failed"))
-            return
-
-        history.append(("user", text))
-        messages = [{"role": r, "content": c} for r, c in history]
-        
-        reply = generate_response(messages)
-        history.append(("assistant", reply))
-
-        hits = query_search_indices(text)
-        if hits:
-            reply += "\n\nAdditional context:\n" + "\n".join(hits)
-
-        logger.info(f"Replying to user {user_id}: {reply}")
-        await context.send_activity(MessageFactory.text(reply))
-
-    except Exception as e:
-        logger.error(f"Error in on_turn function: {str(e)}", exc_info=True)
-        await context.send_activity(MessageFactory.text("An error occurred while processing your request."))
+    # Continue with normal processing for message activities
+    user_id = context.activity.from_property.id or "unknown"
+    text = (context.activity.text or "").strip()
+    logger.info(f"Received message from user {user_id}: {text}")
+    
+    # Your existing logic...
+    history = session_history.setdefault(user_id, [])
+    history.append(("user", text))
+    messages = [{"role": r, "content": c} for r, c in history]
+    
+    reply = generate_response(messages)
+    history.append(("assistant", reply))
+    hits = query_search_indices(text)
+    if hits:
+        reply += "\n\nAdditional context:\n" + "\n".join(hits)
+    
+    logger.info(f"Replying to user {user_id}: {reply}")
+    await context.send_activity(MessageFactory.text(reply))
 
 @app.route("/api/messages", methods=["POST"])
 def messages():
