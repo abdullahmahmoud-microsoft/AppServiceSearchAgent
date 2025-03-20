@@ -141,6 +141,9 @@ def messages():
     body = request.json
     auth_header = request.headers.get("Authorization", "")
     activity = Activity().deserialize(body)
+    logger.debug(f"Deserialized activity: {activity}")
+    logger.debug(f"Activity 'from': {activity.from_property}")
+    logger.debug(f"Auth header: {auth_header}")
     try:
         asyncio.run(adapter.process_activity(activity, auth_header, on_turn))
         logger.info("Successfully processed activity")
