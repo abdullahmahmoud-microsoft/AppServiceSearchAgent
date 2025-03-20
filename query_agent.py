@@ -8,9 +8,11 @@ from dotenv import load_dotenv
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
-from botbuilder.core import TurnContext, MessageFactory, CloudAdapter
+from azure.identity import ManagedIdentityCredential
+from botbuilder.core import TurnContext, MessageFactory, BotFrameworkAdapterSettings
 from botbuilder.schema import Activity
-from botbuilder.integration.aiohttp import ConfigurationBotFrameworkAuthentication
+from botbuilder.integration.aiohttp import BotFrameworkHttpAdapter
+from botframework.connector.auth import MicrosoftAppCredentials
 
 # Load settings
 load_dotenv()
@@ -29,6 +31,29 @@ def get_indices():
 
 INDICES = get_indices()
 session_history = {}
+
+# Use Managed Identity for authentication
+credential = ManagedIdentityCredential()
+
+def get_access_token():
+    token = credential.get_token("https://api.botframework.com/.default")
+    return token.token
+
+# Custom Credentials class for MSI authentication
+class MSIAppCredentials(MicrosoftAppCredentials):
+    def __init__(self, app_id):
+        super().__init__(app_id, "")
+    
+    def get_access_token(self):
+        return get_access_token()
+
+settings = BotFrameworkAdapterSettings(
+    app_id=os.getenv("MicrosoftAppId"),
+    app_password=None  # No password needed for MSI
+)
+
+adapter = BotFrameworkHttpAdapter(settings)
+adapter.credentials = MSIAppCredentials(os.getenv("MicrosoftAppId"))
 
 def query_search_indices(query):
     endpoint = f"https://{SEARCH_SERVICE_NAME}.search.windows.net"
@@ -76,10 +101,6 @@ def store_conversation(user_id, history):
 # Flask + Bot Framework setup
 app = Flask(__name__)
 
-# Authentication using the from_configuration method which automatically handles MSI or App ID and Password
-auth = ConfigurationBotFrameworkAuthentication.from_configuration()
-adapter = CloudAdapter(auth)
-
 async def on_turn(context: TurnContext):
     user_id = context.activity.from_property.id or "unknown"
     text = (context.activity.text or "").strip()
@@ -109,8 +130,9 @@ def messages():
         return Response(status=415)
     activity = Activity().deserialize(body)
     auth_header = request.headers.get("Authorization", "")
-    task = adapter.process_activity(activity, auth_header, on_turn)
-    asyncio.get_event_loop().run_until_complete(task)
+    
+    asyncio.run(adapter.process_activity(activity, auth_header, on_turn))
+
     return Response(status=201)
 
 @app.route("/")

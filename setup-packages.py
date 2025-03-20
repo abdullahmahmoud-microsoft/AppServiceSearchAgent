@@ -4,18 +4,20 @@ import sys
 import site
 
 packages = [
-    "azure-storage-blob",
-    "azure-core",
-    "azure-search-documents",
-    "PyMuPDF",
-    "beautifulsoup4",
-    "selenium",
-    "webdriver_manager",
-    "python-dotenv",
-    "flask",
-    "botbuilder-core",
-    "botbuilder-schema",
-    "requests"
+    "azure-storage-blob==12.14.0",
+    "azure-core==1.31.0",
+    "azure-identity",
+    "azure-search-documents==11.5.2",
+    "PyMuPDF==1.23.0",
+    "beautifulsoup4==4.12.2",
+    "selenium==4.9.0",
+    "webdriver_manager==4.0.2",
+    "python-dotenv==1.0.0",
+    "flask==2.3.2",
+    "botbuilder-core==4.16.2",
+    "botbuilder-schema==4.16.2",
+    "botbuilder-integration-aiohttp==4.16.2",
+    "requests==2.28.1"
 ]
 
 def install_packages(packages):
