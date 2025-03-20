@@ -56,9 +56,7 @@ def get_access_token():
 class MSIAppCredentials:
     def __init__(self):
         self.token = get_access_token()
-
-    def get_access_token(self):
-        return self.token
+        self.caller_id = CONFIG.get("MicrosoftAppId")
 
 # Create BotFramework Authentication Configuration
 CONFIG = {
