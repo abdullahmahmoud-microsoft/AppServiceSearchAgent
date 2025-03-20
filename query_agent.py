@@ -25,15 +25,16 @@ ADMIN_KEY = os.getenv("ADMIN_KEY")
 OPENAI_ENDPOINT = os.getenv("OPENAI_ENDPOINT") 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DEPLOYMENT_NAME = os.getenv("DEPLOYMENT_NAME")
+USER_ASSIGNED_CLIENT_ID = os.getenv("AZURE_CLIENT_ID")
+MICROSOFT_APP_ID = os.getenv("MicrosoftAppId")
 
 logger.info(f"SEARCH_SERVICE_NAME: {SEARCH_SERVICE_NAME}")
 logger.info(f"ADMIN_KEY: {ADMIN_KEY}")
 logger.info(f"OPENAI_ENDPOINT: {OPENAI_ENDPOINT}")
 logger.info(f"OPENAI_API_KEY: {OPENAI_API_KEY}")
 logger.info(f"DEPLOYMENT_NAME: {DEPLOYMENT_NAME}")
-
-# Retrieve the User Assigned Identity Client ID
-USER_ASSIGNED_CLIENT_ID = os.getenv("MicrosoftAppId")
+logger.info(f"USER_ASSIGNED_CLIENT_ID: {USER_ASSIGNED_CLIENT_ID}")
+logger.info(f"MicrosoftAppId: {MICROSOFT_APP_ID}")
 
 # Get Managed Identity Credential
 credential = ManagedIdentityCredential(client_id=USER_ASSIGNED_CLIENT_ID)
@@ -42,7 +43,7 @@ credential = ManagedIdentityCredential(client_id=USER_ASSIGNED_CLIENT_ID)
 def get_access_token():
     try:
         logger.info("Fetching MSI access token for Bot Framework API...")
-        token = credential.get_token("https://api.botframework.com/.default")
+        token = credential.get_token("https://graph.microsoft.com/.default")
         logger.info("Successfully retrieved access token.")
         return token.token
     except Exception as e:
@@ -59,7 +60,7 @@ class MSIAppCredentials:
 
 # Update bot settings
 settings = BotFrameworkAdapterSettings(
-    app_id=USER_ASSIGNED_CLIENT_ID,
+    app_id=MICROSOFT_APP_ID,
     app_password=None  # No password needed for MSI
 )
 
