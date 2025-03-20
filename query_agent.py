@@ -21,18 +21,11 @@ OPENAI_ENDPOINT = os.getenv("OPENAI_ENDPOINT")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DEPLOYMENT_NAME = os.getenv("DEPLOYMENT_NAME")
 
-# Build Azure Search index list once
-def get_indices():
-    endpoint = f"https://{SEARCH_SERVICE_NAME}.search.windows.net"
-    credential = AzureKeyCredential(ADMIN_KEY)
-    client = SearchIndexClient(endpoint, credential)
-    return [idx.name for idx in client.list_indexes()]
+# Retrieve the User Assigned Identity Client ID
+USER_ASSIGNED_CLIENT_ID = os.getenv("MicrosoftAppId")
 
-INDICES = get_indices()
-session_history = {}
-
-# Get the Managed Identity Credential
-credential = ManagedIdentityCredential()
+# Get Managed Identity Credential
+credential = ManagedIdentityCredential(client_id=USER_ASSIGNED_CLIENT_ID)
 
 # Function to get an access token
 def get_access_token():
@@ -49,12 +42,22 @@ class MSIAppCredentials:
 
 # Update bot settings
 settings = BotFrameworkAdapterSettings(
-    app_id=os.getenv("MicrosoftAppId"),
+    app_id=USER_ASSIGNED_CLIENT_ID,
     app_password=None  # No password needed for MSI
 )
 
 adapter = BotFrameworkHttpAdapter(settings)
 adapter.credentials = MSIAppCredentials()
+
+# Build Azure Search index list once
+def get_indices():
+    endpoint = f"https://{SEARCH_SERVICE_NAME}.search.windows.net"
+    credential = AzureKeyCredential(ADMIN_KEY)
+    client = SearchIndexClient(endpoint, credential)
+    return [idx.name for idx in client.list_indexes()]
+
+INDICES = get_indices()
+session_history = {}
 
 def query_search_indices(query):
     endpoint = f"https://{SEARCH_SERVICE_NAME}.search.windows.net"
@@ -125,6 +128,7 @@ async def on_turn(context: TurnContext):
 
 @app.route("/api/messages", methods=["POST"])
 def messages():
+    return Response("Echo endpoint is working!", status=200)
     if request.headers.get("Content-Type", "").startswith("application/json"):
         body = request.json
     else:
