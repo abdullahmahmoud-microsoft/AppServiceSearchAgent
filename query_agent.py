@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import time
@@ -13,29 +14,40 @@ from botbuilder.core import TurnContext, MessageFactory, BotFrameworkAdapterSett
 from botbuilder.schema import Activity
 from botbuilder.integration.aiohttp import BotFrameworkHttpAdapter
 
+# Configure logging
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
 # Load settings
 load_dotenv()
 SEARCH_SERVICE_NAME = os.getenv("SEARCH_SERVICE_NAME")
 ADMIN_KEY = os.getenv("ADMIN_KEY")
-OPENAI_ENDPOINT = os.getenv("OPENAI_ENDPOINT")
+OPENAI_ENDPOINT = os.getenv("OPENAI_ENDPOINT") 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DEPLOYMENT_NAME = os.getenv("DEPLOYMENT_NAME")
 
+logger.info(f"SEARCH_SERVICE_NAME: {SEARCH_SERVICE_NAME}")
+logger.info(f"ADMIN_KEY: {ADMIN_KEY}")
+logger.info(f"OPENAI_ENDPOINT: {OPENAI_ENDPOINT}")
+logger.info(f"OPENAI_API_KEY: {OPENAI_API_KEY}")
+logger.info(f"DEPLOYMENT_NAME: {DEPLOYMENT_NAME}")
+
 # Retrieve the User Assigned Identity Client ID
 USER_ASSIGNED_CLIENT_ID = os.getenv("MicrosoftAppId")
-
-import logging
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 
 # Get Managed Identity Credential
 credential = ManagedIdentityCredential(client_id=USER_ASSIGNED_CLIENT_ID)
 
 # Function to get an access token
 def get_access_token():
-    token = credential.get_token("https://graph.microsoft.com/.default")
-    return token.token
+    try:
+        logger.info("Fetching MSI access token for Bot Framework API...")
+        token = credential.get_token("https://api.botframework.com/.default")
+        logger.info("Successfully retrieved access token.")
+        return token.token
+    except Exception as e:
+        logger.error(f"Failed to retrieve access token: {str(e)}")
+        return None  # Return None if MSI authentication fails
 
 # Custom MSI Credentials for Bot Framework
 class MSIAppCredentials:
@@ -111,48 +123,51 @@ def store_conversation(user_id, history):
 app = Flask(__name__)
 
 async def on_turn(context: TurnContext):
-    user_id = context.activity.from_property.id or "unknown"
-    text = (context.activity.text or "").strip()
+    try:
+        user_id = context.activity.from_property.id or "unknown"
+        text = (context.activity.text or "").strip()
 
-    history = session_history.setdefault(user_id, [])
-    if re.search(r"store\s+.*(knowledge base|index)", text, re.IGNORECASE):
-        ok = store_conversation(user_id, history)
-        session_history[user_id] = []
-        await context.send_activity(MessageFactory.text("Stored!" if ok else "Store failed"))
-        return
+        logger.info(f"Received message from user {user_id}: {text}")
 
-    history.append(("user", text))
-    messages = [{"role": r, "content": c} for r, c in history]
-    reply = generate_response(messages)
-    history.append(("assistant", reply))
+        history = session_history.setdefault(user_id, [])
+        if re.search(r"store\s+.*(knowledge base|index)", text, re.IGNORECASE):
+            logger.info(f"User {user_id} requested to store conversation.")
+            ok = store_conversation(user_id, history)
+            session_history[user_id] = []
+            await context.send_activity(MessageFactory.text("Stored!" if ok else "Store failed"))
+            return
 
-    hits = query_search_indices(text)
-    if hits:
-        reply += "\n\nAdditional context:\n" + "\n".join(hits)
-    await context.send_activity(MessageFactory.text(reply))
+        history.append(("user", text))
+        messages = [{"role": r, "content": c} for r, c in history]
+        
+        reply = generate_response(messages)
+        history.append(("assistant", reply))
 
-@app.route("/test-log")
-def test_log():
-    logging.info("This is a test log entry.")
-    return "Log entry created!"
+        hits = query_search_indices(text)
+        if hits:
+            reply += "\n\nAdditional context:\n" + "\n".join(hits)
+
+        logger.info(f"Replying to user {user_id}: {reply}")
+        await context.send_activity(MessageFactory.text(reply))
+
+    except Exception as e:
+        logger.error(f"Error in on_turn function: {str(e)}", exc_info=True)
+        await context.send_activity(MessageFactory.text("An error occurred while processing your request."))
 
 @app.route("/api/messages", methods=["POST"])
 def messages():
-    return Response("Echo endpoint is working!", status=200)
-    if request.headers.get("Content-Type", "").startswith("application/json"):
-        body = request.json
-    else:
-        return Response(status=415)
-    activity = Activity().deserialize(body)
-    auth_header = request.headers.get("Authorization", "")
-    
-    asyncio.run(adapter.process_activity(activity, auth_header, on_turn))
-
-    return Response(status=201)
+    try:
+        logger.info("Received request at /api/messages")
+        return Response("Echo endpoint is working!", status=200)
+    except Exception as e:
+        logger.error(f"Error in /api/messages endpoint: {str(e)}", exc_info=True)
+        return Response("Internal Server Error", status=500)
 
 @app.route("/")
 def alive():
+    logger.info("Health check: App is alive")
     return "Antares Genie is ALLIIVEEEEEE."
 
 if __name__ == "__main__":
+    logger.info("Starting Antares Genie bot server...")
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 3978)))
