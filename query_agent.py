@@ -29,7 +29,7 @@ credential = ManagedIdentityCredential(client_id=USER_ASSIGNED_CLIENT_ID)
 
 # Function to get an access token
 def get_access_token():
-    token = credential.get_token("https://api.botframework.com/.default")
+    token = credential.get_token("https://graph.microsoft.com/.default")
     return token.token
 
 # Custom MSI Credentials for Bot Framework
