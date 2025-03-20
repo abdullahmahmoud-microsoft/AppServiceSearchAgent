@@ -177,6 +177,9 @@ def messages():
     logger.info(f"Processing activity: {body}")
 
     activity = Activity().deserialize(body)
+    # Show all activity parameters
+    logger.info(f"Activity post deserialize: {vars(activity)}")
+    logger.info(f"Auth header: {auth_header}")
     
     try:
         asyncio.run(adapter.process_activity(activity, auth_header, on_turn))
