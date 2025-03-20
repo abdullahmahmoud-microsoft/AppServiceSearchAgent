@@ -156,12 +156,26 @@ async def on_turn(context: TurnContext):
 
 @app.route("/api/messages", methods=["POST"])
 def messages():
+    logger.info("Received request at /api/messages")
+
+    if not request.is_json:
+        logger.error("Invalid request format")
+        return Response("Invalid request format", status=400)
+
+    body = request.json
+    auth_header = request.headers.get("Authorization", "")
+
+    logger.info(f"Processing activity: {body}")
+
+    activity = Activity().deserialize(body)
+    
     try:
-        logger.info("Received request at /api/messages")
-        return Response("Echo endpoint is working!", status=200)
+        asyncio.run(adapter.process_activity(activity, auth_header, on_turn))
+        logger.info("Successfully processed activity")
     except Exception as e:
-        logger.error(f"Error in /api/messages endpoint: {str(e)}", exc_info=True)
-        return Response("Internal Server Error", status=500)
+        logger.error(f"Error processing activity: {e}")
+
+    return Response(status=201)
 
 @app.route("/")
 def alive():
