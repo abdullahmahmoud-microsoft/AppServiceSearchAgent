@@ -68,68 +68,20 @@ CONFIG = {
     "MicrosoftAppType": MICROSOFT_APP_TYPE,
 }
 
-# Initialize CloudAdapter
 adapter = CloudAdapter(ConfigurationBotFrameworkAuthentication(CONFIG))
-adapter.credentials = MSIAppCredentials()
-logger.info(f"Adapter credentials: {vars(adapter.credentials)}")
+
+# Explicitly instantiate MSIAppCredentials
+msi_credentials = MSIAppCredentials()
+adapter.credentials = msi_credentials
+
+logger.info(f"Adapter credentials type: {type(adapter.credentials)}")
+logger.info(f"Adapter credentials attributes: {dir(adapter.credentials)}")
+logger.info(f"Adapter credentials: {vars(msi_credentials)}")
 
 async def on_error(context: TurnContext, error: Exception):
     logger.error(f"[on_turn_error] Unhandled error: {error}")
     await context.send_activity("The bot encountered an error. Please try again later.")
 adapter.on_turn_error = on_error
-
-# Build Azure Search index list once
-def get_indices():
-    endpoint = f"https://{SEARCH_SERVICE_NAME}.search.windows.net"
-    credential = AzureKeyCredential(ADMIN_KEY)
-    client = SearchIndexClient(endpoint, credential)
-    return [idx.name for idx in client.list_indexes()]
-
-INDICES = get_indices()
-session_history = {}
-
-def query_search_indices(query):
-    endpoint = f"https://{SEARCH_SERVICE_NAME}.search.windows.net"
-    credential = AzureKeyCredential(ADMIN_KEY)
-    results = []
-    for index in INDICES:
-        client = SearchClient(endpoint, index, credential)
-        hits = client.search(search_text=query, top=5, semantic_configuration_name="default", search_fields=["title", "content"])
-        for r in hits:
-            title = r.get("title", "No Title")
-            content = r.get("content", "")
-            if content:
-                results.append(f"[{index}] {title}: {content}")
-    return results
-
-def generate_response(messages):
-    headers = {"Content-Type": "application/json", "api-key": OPENAI_API_KEY}
-    payload = {"model": DEPLOYMENT_NAME, "messages": messages, "max_tokens": 1000}
-    resp = requests.post(OPENAI_ENDPOINT, headers=headers, json=payload).json()
-    return resp.get("choices", [{}])[0].get("message", {}).get("content", "")
-
-from create_index import generate_qa_pairs, create_or_replace_index, upload_documents
-
-def store_conversation(user_id, history):
-    convo = "\n".join(f"{role.capitalize()}: {msg}" for role, msg in history)
-    qa_pairs = generate_qa_pairs(convo, f"conversation-{user_id}")
-    docs = []
-    for i, qa in enumerate(qa_pairs):
-        q, a = qa.get("question", "").strip(), qa.get("answer", "").strip()
-        if q and a:
-            docs.append({
-                "id": f"{user_id}-{i}",
-                "doc_type": "qa",
-                "page_title": f"Conversation {user_id}",
-                "title": q,
-                "content": f"Q: {q}\nA: {a}",
-                "file_name": f"conversation-{user_id}",
-                "upload_date": time.strftime("%Y-%m-%dT%H:%M:%SZ")
-            })
-    index_name = f"conversation-{user_id}".lower()
-    create_or_replace_index(SEARCH_SERVICE_NAME, ADMIN_KEY, index_name)
-    upload_documents(SEARCH_SERVICE_NAME, ADMIN_KEY, index_name, docs)
-    return bool(docs)
 
 # Flask + Bot Framework setup
 app = Flask(__name__)
@@ -137,29 +89,15 @@ app = Flask(__name__)
 async def on_turn(context: TurnContext):
     activity_type = context.activity.type
     if activity_type == "conversationUpdate":
-        # Optionally, send a welcome message or simply ignore the event
         logger.info("Received conversationUpdate event")
         await context.send_activity("Welcome to the bot!")
         return
 
-    # Continue with normal processing for message activities
     user_id = context.activity.from_property.id or "unknown"
     text = (context.activity.text or "").strip()
     logger.info(f"Received message from user {user_id}: {text}")
     
-    # Your existing logic...
-    history = session_history.setdefault(user_id, [])
-    history.append(("user", text))
-    messages = [{"role": r, "content": c} for r, c in history]
-    
-    reply = generate_response(messages)
-    history.append(("assistant", reply))
-    hits = query_search_indices(text)
-    if hits:
-        reply += "\n\nAdditional context:\n" + "\n".join(hits)
-    
-    logger.info(f"Replying to user {user_id}: {reply}")
-    await context.send_activity(MessageFactory.text(reply))
+    await context.send_activity(MessageFactory.text(f"Echo: {text}"))
 
 @app.route("/api/messages", methods=["POST"])
 def messages():
@@ -173,9 +111,8 @@ def messages():
     auth_header = request.headers.get("Authorization", "")
 
     logger.info(f"Processing activity: {body}")
-
+    
     activity = Activity().deserialize(body)
-    # Show all activity parameters
     logger.info(f"Activity post deserialize: {vars(activity)}")
     logger.info(f"Auth header: {auth_header}")
     
