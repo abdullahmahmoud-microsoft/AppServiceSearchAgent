@@ -24,6 +24,11 @@ DEPLOYMENT_NAME = os.getenv("DEPLOYMENT_NAME")
 # Retrieve the User Assigned Identity Client ID
 USER_ASSIGNED_CLIENT_ID = os.getenv("MicrosoftAppId")
 
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+
 # Get Managed Identity Credential
 credential = ManagedIdentityCredential(client_id=USER_ASSIGNED_CLIENT_ID)
 
@@ -125,6 +130,11 @@ async def on_turn(context: TurnContext):
     if hits:
         reply += "\n\nAdditional context:\n" + "\n".join(hits)
     await context.send_activity(MessageFactory.text(reply))
+
+@app.route("/test-log")
+def test_log():
+    logging.info("This is a test log entry.")
+    return "Log entry created!"
 
 @app.route("/api/messages", methods=["POST"])
 def messages():
