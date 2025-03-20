@@ -10,9 +10,10 @@ from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
 from azure.identity import ManagedIdentityCredential
-from botbuilder.core import TurnContext, MessageFactory, BotFrameworkAdapterSettings
+from botbuilder.core import TurnContext, MessageFactory
 from botbuilder.schema import Activity
 from botbuilder.integration.aiohttp import CloudAdapter, ConfigurationBotFrameworkAuthentication
+from botframework.connector.auth.microsoft_app_credentials import MicrosoftAppCredentials
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -52,11 +53,11 @@ def get_access_token():
         logger.error(f"Failed to retrieve access token: {str(e)}")
         return None  # Return None if MSI authentication fails
 
-# Custom MSI Credentials for Bot Framework
-class MSIAppCredentials:
+class MSIAppCredentials(MicrosoftAppCredentials):
     def __init__(self):
-        self.token = get_access_token()
-        self.caller_id = CONFIG.get("MicrosoftAppId")
+        super().__init__(MICROSOFT_APP_ID, None)
+        self._token = get_access_token()
+
 
 # Create BotFramework Authentication Configuration
 CONFIG = {
