@@ -12,7 +12,6 @@ from azure.identity import ManagedIdentityCredential
 from botbuilder.core import TurnContext, MessageFactory, BotFrameworkAdapterSettings
 from botbuilder.schema import Activity
 from botbuilder.integration.aiohttp import BotFrameworkHttpAdapter
-from botframework.connector.auth import MicrosoftAppCredentials
 
 # Load settings
 load_dotenv()
@@ -32,28 +31,30 @@ def get_indices():
 INDICES = get_indices()
 session_history = {}
 
-# Use Managed Identity for authentication
+# Get the Managed Identity Credential
 credential = ManagedIdentityCredential()
 
+# Function to get an access token
 def get_access_token():
     token = credential.get_token("https://api.botframework.com/.default")
     return token.token
 
-# Custom Credentials class for MSI authentication
-class MSIAppCredentials(MicrosoftAppCredentials):
-    def __init__(self, app_id):
-        super().__init__(app_id, "")
-    
-    def get_access_token(self):
-        return get_access_token()
+# Custom MSI Credentials for Bot Framework
+class MSIAppCredentials:
+    def __init__(self):
+        self.token = get_access_token()
 
+    def get_access_token(self):
+        return self.token
+
+# Update bot settings
 settings = BotFrameworkAdapterSettings(
     app_id=os.getenv("MicrosoftAppId"),
     app_password=None  # No password needed for MSI
 )
 
 adapter = BotFrameworkHttpAdapter(settings)
-adapter.credentials = MSIAppCredentials(os.getenv("MicrosoftAppId"))
+adapter.credentials = MSIAppCredentials()
 
 def query_search_indices(query):
     endpoint = f"https://{SEARCH_SERVICE_NAME}.search.windows.net"
