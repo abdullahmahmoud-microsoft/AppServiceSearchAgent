@@ -10,7 +10,7 @@ from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
 from azure.identity import ManagedIdentityCredential
-from botbuilder.core import TurnContext, MessageFactory
+from botbuilder.core import TurnContext, MessageFactory, BotFrameworkAdapterSettings
 from botbuilder.schema import Activity
 from botbuilder.integration.aiohttp import CloudAdapter, ConfigurationBotFrameworkAuthentication
 
@@ -22,20 +22,43 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 SEARCH_SERVICE_NAME = os.getenv("SEARCH_SERVICE_NAME")
 ADMIN_KEY = os.getenv("ADMIN_KEY")
-OPENAI_ENDPOINT = os.getenv("OPENAI_ENDPOINT")
+OPENAI_ENDPOINT = os.getenv("OPENAI_ENDPOINT") 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DEPLOYMENT_NAME = os.getenv("DEPLOYMENT_NAME")
 USER_ASSIGNED_CLIENT_ID = os.getenv("AZURE_CLIENT_ID")
 MICROSOFT_APP_ID = os.getenv("MicrosoftAppId")
 MICROSOFT_APP_TENANT_ID = os.getenv("MicrosoftAppTenantId")
-MICROSOFT_APP_TYPE = os.getenv("MicrosoftAppType", "UserAssignedMSI")
+MICROSOFT_APP_TYPE = os.getenv("MicrosoftAppType")
 
 logger.info(f"SEARCH_SERVICE_NAME: {SEARCH_SERVICE_NAME}")
 logger.info(f"ADMIN_KEY: {ADMIN_KEY}")
 logger.info(f"OPENAI_ENDPOINT: {OPENAI_ENDPOINT}")
+logger.info(f"OPENAI_API_KEY: {OPENAI_API_KEY}")
 logger.info(f"DEPLOYMENT_NAME: {DEPLOYMENT_NAME}")
 logger.info(f"USER_ASSIGNED_CLIENT_ID: {USER_ASSIGNED_CLIENT_ID}")
 logger.info(f"MicrosoftAppId: {MICROSOFT_APP_ID}")
+
+# Get Managed Identity Credential
+credential = ManagedIdentityCredential(client_id=USER_ASSIGNED_CLIENT_ID)
+
+# Function to get an access token
+def get_access_token():
+    try:
+        logger.info("Fetching MSI access token for Bot Framework API...")
+        token = credential.get_token("https://graph.microsoft.com/.default")
+        logger.info("Successfully retrieved access token.")
+        return token.token
+    except Exception as e:
+        logger.error(f"Failed to retrieve access token: {str(e)}")
+        return None  # Return None if MSI authentication fails
+
+# Custom MSI Credentials for Bot Framework
+class MSIAppCredentials:
+    def __init__(self):
+        self.token = get_access_token()
+
+    def get_access_token(self):
+        return self.token
 
 # Create BotFramework Authentication Configuration
 CONFIG = {
@@ -46,22 +69,21 @@ CONFIG = {
 
 # Initialize CloudAdapter
 adapter = CloudAdapter(ConfigurationBotFrameworkAuthentication(CONFIG))
+adapter.credentials = MSIAppCredentials()
 
-# Error handling
 async def on_error(context: TurnContext, error: Exception):
     logger.error(f"[on_turn_error] Unhandled error: {error}")
     await context.send_activity("The bot encountered an error. Please try again later.")
 adapter.on_turn_error = on_error
 
-# Azure Search Indexing
-INDICES = []
+# Build Azure Search index list once
 def get_indices():
     endpoint = f"https://{SEARCH_SERVICE_NAME}.search.windows.net"
     credential = AzureKeyCredential(ADMIN_KEY)
     client = SearchIndexClient(endpoint, credential)
     return [idx.name for idx in client.list_indexes()]
-INDICES = get_indices()
 
+INDICES = get_indices()
 session_history = {}
 
 def query_search_indices(query):
@@ -89,31 +111,37 @@ from create_index import generate_qa_pairs, create_or_replace_index, upload_docu
 def store_conversation(user_id, history):
     convo = "\n".join(f"{role.capitalize()}: {msg}" for role, msg in history)
     qa_pairs = generate_qa_pairs(convo, f"conversation-{user_id}")
-    docs = [{
-        "id": f"{user_id}-{i}",
-        "doc_type": "qa",
-        "page_title": f"Conversation {user_id}",
-        "title": qa.get("question", "").strip(),
-        "content": f"Q: {qa.get('question', '').strip()}\nA: {qa.get('answer', '').strip()}",
-        "file_name": f"conversation-{user_id}",
-        "upload_date": time.strftime("%Y-%m-%dT%H:%M:%SZ")
-    } for i, qa in enumerate(qa_pairs) if qa.get("question") and qa.get("answer")]
+    docs = []
+    for i, qa in enumerate(qa_pairs):
+        q, a = qa.get("question", "").strip(), qa.get("answer", "").strip()
+        if q and a:
+            docs.append({
+                "id": f"{user_id}-{i}",
+                "doc_type": "qa",
+                "page_title": f"Conversation {user_id}",
+                "title": q,
+                "content": f"Q: {q}\nA: {a}",
+                "file_name": f"conversation-{user_id}",
+                "upload_date": time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            })
     index_name = f"conversation-{user_id}".lower()
     create_or_replace_index(SEARCH_SERVICE_NAME, ADMIN_KEY, index_name)
     upload_documents(SEARCH_SERVICE_NAME, ADMIN_KEY, index_name, docs)
     return bool(docs)
 
-# Flask Setup
+# Flask + Bot Framework setup
 app = Flask(__name__)
 
 async def on_turn(context: TurnContext):
     try:
         user_id = context.activity.from_property.id or "unknown"
         text = (context.activity.text or "").strip()
+
         logger.info(f"Received message from user {user_id}: {text}")
+
         history = session_history.setdefault(user_id, [])
-        
         if re.search(r"store\s+.*(knowledge base|index)", text, re.IGNORECASE):
+            logger.info(f"User {user_id} requested to store conversation.")
             ok = store_conversation(user_id, history)
             session_history[user_id] = []
             await context.send_activity(MessageFactory.text("Stored!" if ok else "Store failed"))
@@ -121,14 +149,17 @@ async def on_turn(context: TurnContext):
 
         history.append(("user", text))
         messages = [{"role": r, "content": c} for r, c in history]
+        
         reply = generate_response(messages)
         history.append(("assistant", reply))
+
         hits = query_search_indices(text)
         if hits:
             reply += "\n\nAdditional context:\n" + "\n".join(hits)
-        
+
         logger.info(f"Replying to user {user_id}: {reply}")
         await context.send_activity(MessageFactory.text(reply))
+
     except Exception as e:
         logger.error(f"Error in on_turn function: {str(e)}", exc_info=True)
         await context.send_activity(MessageFactory.text("An error occurred while processing your request."))
@@ -136,23 +167,29 @@ async def on_turn(context: TurnContext):
 @app.route("/api/messages", methods=["POST"])
 def messages():
     logger.info("Received request at /api/messages")
+
     if not request.is_json:
+        logger.error("Invalid request format")
         return Response("Invalid request format", status=400)
+
     body = request.json
     auth_header = request.headers.get("Authorization", "")
+
+    logger.info(f"Processing activity: {body}")
+
     activity = Activity().deserialize(body)
-    logger.debug(f"Deserialized activity: {activity}")
-    logger.debug(f"Activity 'from': {activity.from_property}")
-    logger.debug(f"Auth header: {auth_header}")
+    
     try:
         asyncio.run(adapter.process_activity(activity, auth_header, on_turn))
         logger.info("Successfully processed activity")
     except Exception as e:
         logger.error(f"Error processing activity: {e}")
+
     return Response(status=201)
 
 @app.route("/")
 def alive():
+    logger.info("Health check: App is alive")
     return "Antares Genie is ALLIIVEEEEEE."
 
 if __name__ == "__main__":
