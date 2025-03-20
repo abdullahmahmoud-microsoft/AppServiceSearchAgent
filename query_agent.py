@@ -4,20 +4,25 @@ from datetime import datetime
 from aiohttp import web
 from botbuilder.core import TurnContext
 from botbuilder.core.integration import aiohttp_error_middleware
-from botbuilder.integration.aiohttp import CloudAdapter, ConfigurationBotFrameworkAuthentication
+from botbuilder.integration.aiohttp import CloudAdapter
 from botbuilder.schema import Activity, ActivityTypes
 from bot import MyBot
 from config import DefaultConfig
-import sys
-import traceback
+from azure.identity import ManagedIdentityCredential
+from botframework.connector.auth import ManagedIdentityAppCredentials
 from http import HTTPStatus
-from aiohttp import web
 from aiohttp.web import Response, json_response
 
 CONFIG = DefaultConfig()
 
+# Create Managed Identity Credential
+credential = ManagedIdentityCredential(client_id=CONFIG.USER_ASSIGNED_CLIENT_ID)
+
+# Create Managed Identity App Credentials
+app_credentials = ManagedIdentityAppCredentials(credential, CONFIG.APP_ID)
+
 # Create adapter with authentication configuration
-ADAPTER = CloudAdapter(ConfigurationBotFrameworkAuthentication(CONFIG))
+ADAPTER = CloudAdapter(app_credentials)
 
 # Catch-all for errors.
 async def on_error(context: TurnContext, error: Exception):
