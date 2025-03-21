@@ -5,12 +5,12 @@ from datetime import datetime
 from aiohttp import web
 from botbuilder.core import TurnContext
 from botbuilder.core.integration import aiohttp_error_middleware
-from botbuilder.integration.aiohttp import CloudAdapter, ConfigurationBotFrameworkAuthentication
+from botbuilder.integration.aiohttp import CloudAdapter
 from botbuilder.schema import Activity, ActivityTypes
-from bot import MyBot
-from config import DefaultConfig
 from azure.identity import ManagedIdentityCredential
-from botframework.connector.auth import ManagedIdentityAppCredentials
+from botframework.connector.auth import MicrosoftAppCredentials, BotFrameworkAuthentication
+from config import DefaultConfig
+from bot import MyBot
 from http import HTTPStatus
 from aiohttp.web import Response, json_response
 
@@ -20,34 +20,46 @@ logger = logging.getLogger(__name__)
 
 CONFIG = DefaultConfig()
 
-# Create Managed Identity Credential
-credential = ManagedIdentityCredential(client_id=CONFIG.USER_ASSIGNED_CLIENT_ID)
+class MSIAppCredentials(MicrosoftAppCredentials):
+    def __init__(self, client_id: str, app_id: str):
+        super().__init__(app_id, None)
+        self.credential = ManagedIdentityCredential(client_id=client_id)
 
-# Create Managed Identity App Credentials
-app_credentials = ManagedIdentityAppCredentials(credential, CONFIG.APP_ID)
+    def get_access_token(self, force_refresh: bool = False):
+        token = self.credential.get_token("https://api.botframework.com/.default")
+        if not token or not token.token:
+            raise Exception("Failed to acquire access token using Managed Identity.")
+        return token.token
 
-# Create authentication configuration
-auth_config = ConfigurationBotFrameworkAuthentication(app_credentials)
+class CustomBotFrameworkAuthentication(BotFrameworkAuthentication):
+    def __init__(self, credentials: MicrosoftAppCredentials):
+        self.credentials = credentials
 
-# Create adapter with authentication configuration
-ADAPTER = CloudAdapter(auth_config)
+    async def authenticate_request(self, *args, **kwargs):
+        class Result:
+            caller_id = None
+        return Result()
 
-# Catch-all for errors.
+    async def create_connector_factory(self, *args, **kwargs):
+        raise NotImplementedError()
+
+    async def create_user_token_client(self, *args, **kwargs):
+        raise NotImplementedError()
+
+# Instantiate Managed Identity credentials and inject
+msi_credentials = MSIAppCredentials(CONFIG.USER_ASSIGNED_CLIENT_ID, CONFIG.APP_ID)
+auth = CustomBotFrameworkAuthentication(msi_credentials)
+
+# Create adapter
+ADAPTER = CloudAdapter(auth)
+
+# Catch-all for errors
 async def on_error(context: TurnContext, error: Exception):
-    # This check writes out errors to console log .vs. app insights.
-    # NOTE: In production environment, you should consider logging this to Azure
-    #       application insights.
-    logger.error(f"\n [on_turn_error] unhandled error: {error}", exc_info=True)
+    logger.error(f"[on_turn_error] Unhandled error: {error}", exc_info=True)
     traceback.print_exc()
-
-    # Send a message to the user
     await context.send_activity("The bot encountered an error or bug.")
-    await context.send_activity(
-        "To continue to run this bot, please fix the bot source code."
-    )
-    # Send a trace activity if we're talking to the Bot Framework Emulator
+    await context.send_activity("To continue to run this bot, please fix the bot source code.")
     if context.activity.channel_id == "emulator":
-        # Create a trace activity that contains the error object
         trace_activity = Activity(
             label="TurnError",
             name="on_turn_error Trace",
@@ -56,28 +68,25 @@ async def on_error(context: TurnContext, error: Exception):
             value=f"{error}",
             value_type="https://www.botframework.com/schemas/error",
         )
-        # Send a trace activity, which will be displayed in Bot Framework Emulator
         await context.send_activity(trace_activity)
 
 ADAPTER.on_turn_error = on_error
 
-# Create the Bot
 BOT = MyBot()
 
-# Listen for incoming requests on /api/messages
+# Aiohttp route
 async def messages(req: web.Request) -> web.Response:
     logger.info("Received request at /api/messages")
-    # Main bot message handler.
-    if "application/json" in req.headers["Content-Type"]:
+    if "application/json" in req.headers.get("Content-Type", ""):
         body = await req.json()
     else:
         logger.warning("Unsupported media type")
         return Response(status=HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
 
     activity = Activity().deserialize(body)
-    auth_header = req.headers["Authorization"] if "Authorization" in req.headers else ""
+    auth_header = req.headers.get("Authorization", "")
 
-    response = await ADAPTER.process_activity(auth_header, activity, BOT.on_turn)
+    response = await ADAPTER.process_activity(activity, auth_header, BOT.on_turn)
     if response:
         logger.info("Response generated by bot")
         return json_response(data=response.body, status=response.status)
