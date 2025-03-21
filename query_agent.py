@@ -24,23 +24,23 @@ CONFIG = DefaultConfig()
 original_authenticate_request = ConfigurationBotFrameworkAuthentication.authenticate_request
 
 async def debug_authenticate_request(self, activity, auth_header):
-    print("🔍 Token validation triggered...")
-    print(f"✅ CONFIG.MicrosoftAppId: {CONFIG.MicrosoftAppId}")
-    print(f"✅ CONFIG.MicrosoftAppClientId (UAMI): {CONFIG.MicrosoftAppClientId}")
-    print(f"✅ CONFIG.MicrosoftAppTenantId: {CONFIG.MicrosoftAppTenantId}")
-    print(f"✅ CONFIG.MicrosoftAppType: {CONFIG.MicrosoftAppType}")
+    logger.info("🔍 Token validation triggered...")
+    logger.info(f"✅ CONFIG.MicrosoftAppId: {CONFIG.MicrosoftAppId}")
+    logger.info(f"✅ CONFIG.MicrosoftAppClientId (UAMI): {CONFIG.MicrosoftAppClientId}")
+    logger.info(f"✅ CONFIG.MicrosoftAppTenantId: {CONFIG.MicrosoftAppTenantId}")
+    logger.info(f"✅ CONFIG.MicrosoftAppType: {CONFIG.MicrosoftAppType}")
 
     try:
         parts = auth_header.split(" ")
         if len(parts) == 2 and parts[0].lower() == "bearer":
             decoded = jwt.decode(parts[1], options={"verify_signature": False})
-            print("🔐 Decoded token:")
+            logger.info("🔐 Decoded token:")
             for k, v in decoded.items():
-                print(f"  {k}: {v}")
+                logger.info(f"  {k}: {v}")
         else:
-            print("⚠️ No bearer token found in Authorization header.")
+            logger.info("⚠️ No bearer token found in Authorization header.")
     except Exception as e:
-        print(f"⚠️ Failed to decode token: {e}")
+        logger.info(f"⚠️ Failed to decode token: {e}")
 
     return await original_authenticate_request(self, activity, auth_header)
 
