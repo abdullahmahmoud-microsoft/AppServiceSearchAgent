@@ -1,4 +1,5 @@
 import sys
+import os
 import traceback
 import logging
 from datetime import datetime
@@ -67,6 +68,14 @@ logger.info("Set on_turn_error handler for ADAPTER")
 BOT = MyBot()
 logger.debug("Created MyBot instance")
 
+async def debug_token(req):
+    try:
+        credential = ManagedIdentityCredential(client_id=os.environ["AZURE_CLIENT_ID"])
+        token = credential.get_token("https://api.botframework.com/.default")
+        return Response(text=f"✅ Got token:\n{token.token[:50]}...", status=200)
+    except Exception as e:
+        return Response(text=f"❌ Failed to get token: {str(e)}", status=500)
+    
 # Listen for incoming requests on /api/messages
 async def messages(req: web.Request) -> web.Response:
     logger.info("Received request at /api/messages")
@@ -117,6 +126,9 @@ APP = web.Application(middlewares=[aiohttp_error_middleware])
 logger.info("Created web application with aiohttp_error_middleware")
 APP.router.add_post("/api/messages", messages)
 logger.info("Added POST route for /api/messages")
+
+APP.router.add_get("/debug-token", debug_token)
+logger.info("Added GET route for /debug-token")
 
 if __name__ == "__main__":
     try:
