@@ -20,6 +20,17 @@ logger = logging.getLogger(__name__)
 
 CONFIG = DefaultConfig()
 logger.info(f"Loaded configuration: {CONFIG}")
+logger.info(f"PORT: {CONFIG.PORT}")
+logger.info(f"APP_ID: {CONFIG.APP_ID}")
+logger.info(f"APP_PASSWORD: {CONFIG.APP_PASSWORD}")
+logger.info(f"APP_TYPE: {CONFIG.APP_TYPE}")
+logger.info(f"APP_TENANTID: {CONFIG.APP_TENANTID}")
+logger.info(f"SEARCH_SERVICE_NAME: {CONFIG.SEARCH_SERVICE_NAME}")
+logger.info(f"ADMIN_KEY: {CONFIG.ADMIN_KEY}")
+logger.info(f"OPENAI_ENDPOINT: {CONFIG.OPENAI_ENDPOINT}")
+logger.info(f"OPENAI_API_KEY: {CONFIG}")
+logger.info(f"DEPLOYMENT_NAME: {CONFIG.DEPLOYMENT_NAME}")
+logger.info(f"USER_ASSIGNED_CLIENT_ID: {CONFIG.USER_ASSIGNED_CLIENT_ID}")
 
 # Create Managed Identity Credential
 credential = ManagedIdentityCredential(client_id=CONFIG.USER_ASSIGNED_CLIENT_ID)
