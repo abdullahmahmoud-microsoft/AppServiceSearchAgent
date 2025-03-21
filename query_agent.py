@@ -88,6 +88,18 @@ async def messages(req: web.Request) -> web.Response:
 
     auth_header = req.headers["Authorization"] if "Authorization" in req.headers else ""
     logger.info(f"Authorization header: {auth_header}")
+    
+    import jwt
+
+    # For debugging only
+    try:
+        parts = auth_header.split(" ")
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            decoded = jwt.decode(parts[1], options={"verify_signature": False})
+            logger.info(f"Decoded token: {decoded}")
+    except Exception as decode_err:
+        logger.warning(f"Failed to decode JWT for debugging: {decode_err}")
+
 
     try:
         response = await ADAPTER.process_activity(auth_header, activity, BOT.on_turn)
