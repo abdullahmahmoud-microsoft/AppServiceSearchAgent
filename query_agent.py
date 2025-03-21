@@ -41,8 +41,22 @@ app_credentials = ManagedIdentityAppCredentials(credential, CONFIG.APP_ID)
 logger.info(f"Created Managed Identity App Credentials with app_id: {CONFIG.APP_ID}")
 
 # Create authentication configuration
-auth_config = ConfigurationBotFrameworkAuthentication(app_credentials)
-logger.info("Created authentication configuration")
+if CONFIG.APP_TYPE == "UserAssignedMSI":
+    logger.info("Using Managed Identity authentication")
+    credential = ManagedIdentityCredential(client_id=CONFIG.USER_ASSIGNED_CLIENT_ID)
+
+    app_credentials = ManagedIdentityAppCredentials(
+        credential=credential,
+        app_id=CONFIG.APP_ID,
+        tenant_id=CONFIG.APP_TENANTID
+    )
+    auth_config = ConfigurationBotFrameworkAuthentication(app_credentials)
+else:
+    logger.warning("Using default AppId/Password auth (should not happen in MSI config!)")
+    auth_config = ConfigurationBotFrameworkAuthentication(
+        app_id=CONFIG.APP_ID,
+        app_password=CONFIG.APP_PASSWORD
+    )
 
 # Create adapter with authentication configuration
 ADAPTER = CloudAdapter(auth_config)
