@@ -11,6 +11,7 @@ from botbuilder.schema import Activity, ActivityTypes
 from bot import MyBot
 from config import DefaultConfig
 from azure.identity import ManagedIdentityCredential
+from botframework.connector.auth import ManagedIdentityAppCredentials
 
 from http import HTTPStatus
 from aiohttp.web import Response, json_response
@@ -25,7 +26,7 @@ logger.info(f"PORT: {CONFIG.PORT}")
 logger.info(f"APP_ID: {CONFIG.APP_ID}")
 logger.info(f"APP_PASSWORD: {CONFIG.APP_PASSWORD}")
 logger.info(f"APP_TYPE: {CONFIG.APP_TYPE}")
-logger.info(f"APP_TENANTID: {CONFIG.APP_TENANTID}")
+#logger.info(f"APP_TENANTID: {CONFIG.APP_TENANTID}")
 #logger.info(f"SEARCH_SERVICE_NAME: {CONFIG.SEARCH_SERVICE_NAME}")
 #logger.info(f"ADMIN_KEY: {CONFIG.ADMIN_KEY}")
 #logger.info(f"OPENAI_ENDPOINT: {CONFIG.OPENAI_ENDPOINT}")
@@ -33,7 +34,7 @@ logger.info(f"APP_TENANTID: {CONFIG.APP_TENANTID}")
 # logger.info(f"DEPLOYMENT_NAME: {CONFIG.DEPLOYMENT_NAME}")
 #logger.info(f"USER_ASSIGNED_CLIENT_ID: {CONFIG.USER_ASSIGNED_CLIENT_ID}")
 
-ADAPTER = CloudAdapter(ManagedIdentityCredential(client_id=CONFIG.USER_ASSIGNED_CLIENT_ID))
+ADAPTER = CloudAdapter(CONFIG)
 
 logger.info("Created CloudAdapter with authentication configuration")
 
