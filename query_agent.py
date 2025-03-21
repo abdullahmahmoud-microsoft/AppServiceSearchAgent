@@ -32,14 +32,6 @@ logger.info(f"OPENAI_API_KEY: {CONFIG.OPENAI_API_KEY}")
 logger.info(f"DEPLOYMENT_NAME: {CONFIG.DEPLOYMENT_NAME}")
 logger.info(f"USER_ASSIGNED_CLIENT_ID: {CONFIG.USER_ASSIGNED_CLIENT_ID}")
 
-# Create Managed Identity Credential
-credential = ManagedIdentityCredential(client_id=CONFIG.USER_ASSIGNED_CLIENT_ID)
-logger.info(f"Created Managed Identity Credential with client_id: {CONFIG.USER_ASSIGNED_CLIENT_ID}")
-
-# Create Managed Identity App Credentials
-app_credentials = ManagedIdentityAppCredentials(credential, CONFIG.APP_ID)
-logger.info(f"Created Managed Identity App Credentials with app_id: {CONFIG.APP_ID}")
-
 # Create authentication configuration
 if CONFIG.APP_TYPE == "UserAssignedMSI":
     logger.info("Using Managed Identity authentication")
