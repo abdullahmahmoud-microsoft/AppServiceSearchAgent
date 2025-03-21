@@ -17,25 +17,34 @@ from botframework.connector.auth import ManagedIdentityAppCredentials
 from http import HTTPStatus
 from aiohttp.web import Response, json_response
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
+from azure.identity import ManagedIdentityCredential
+from botframework.connector.auth import (
+    ClaimsIdentity,
+    MicrosoftAppCredentials,
+    AuthenticationConfiguration,
+    SimpleCredentialProvider,
+    CloudEnvironment,
+    ConfigurationServiceClientCredentialFactory,
+    ServiceClientCredentialsFactory,
+    ConfigurationBotFrameworkAuthentication,
+)
+from config import DefaultConfig
+
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 CONFIG = DefaultConfig()
-logger.info(f"Loaded configuration: {CONFIG}")
-logger.info(f"PORT: {CONFIG.PORT}")
-logger.info(f"APP_ID: {CONFIG.MicrosoftAppId}")
-logger.info(f"APP_TYPE: {CONFIG.MicrosoftAppType}")
-logger.info(f"APP_TENANTID: {CONFIG.MicrosoftAppTenantId}")
-#logger.info(f"SEARCH_SERVICE_NAME: {CONFIG.SEARCH_SERVICE_NAME}")
-#logger.info(f"ADMIN_KEY: {CONFIG.ADMIN_KEY}")
-#logger.info(f"OPENAI_ENDPOINT: {CONFIG.OPENAI_ENDPOINT}")
-# logger.info(f"OPENAI_API_KEY: {CONFIG.OPENAI_API_KEY}")
-# logger.info(f"DEPLOYMENT_NAME: {CONFIG.DEPLOYMENT_NAME}")
-logger.info(f"USER_ASSIGNED_CLIENT_ID: {CONFIG.MicrosoftAppClientId}")
 
-auth_config = ConfigurationBotFrameworkAuthentication(CONFIG)
-ADAPTER = CloudAdapter(auth_config)
+# MSI credential with forced UAMI
+uami_credential = ManagedIdentityCredential(client_id=CONFIG.MicrosoftAppClientId)
+
+# Build manual settings dict to avoid env var name mismatch bugs
+auth_config = ConfigurationBotFrameworkAuthentication({
+    "MicrosoftAppId": CONFIG.MicrosoftAppId,
+    "MicrosoftAppType": CONFIG.MicrosoftAppType,
+    "MicrosoftAppTenantId": CONFIG.MicrosoftAppTenantId,
+    "MicrosoftAppClientId": CONFIG.MicrosoftAppClientId
+})
 
 logger.info("Created CloudAdapter with authentication configuration")
 
@@ -133,7 +142,7 @@ logger.info("Added GET route for /debug-token")
 if __name__ == "__main__":
     try:
         logger.info("Starting web application")
-        web.run_app(APP, host="0.0.0.0", port=CONFIG.PORT)
+        web.run_app(APP, host="0.0.0.0", port=3978)
     except Exception as error:
         logger.error("Failed to start web application", exc_info=True)
         raise error
