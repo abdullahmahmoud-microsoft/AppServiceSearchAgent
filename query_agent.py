@@ -32,24 +32,8 @@ logger.info(f"OPENAI_API_KEY: {CONFIG.OPENAI_API_KEY}")
 logger.info(f"DEPLOYMENT_NAME: {CONFIG.DEPLOYMENT_NAME}")
 logger.info(f"USER_ASSIGNED_CLIENT_ID: {CONFIG.USER_ASSIGNED_CLIENT_ID}")
 
-# Create authentication configuration
-if CONFIG.APP_TYPE == "UserAssignedMSI":
-    logger.info("Using Managed Identity authentication")
-    credential = ManagedIdentityCredential(client_id=CONFIG.USER_ASSIGNED_CLIENT_ID)
+ADAPTER = CloudAdapter(ConfigurationBotFrameworkAuthentication(CONFIG))
 
-    app_credentials = ManagedIdentityAppCredentials(CONFIG.APP_ID)
-    logger.info(f"Created ManagedIdentityAppCredentials with app_id: {CONFIG.APP_ID}")
-    
-    auth_config = ConfigurationBotFrameworkAuthentication(app_credentials)
-else:
-    logger.warning("Using default AppId/Password auth (should not happen in MSI config!)")
-    auth_config = ConfigurationBotFrameworkAuthentication(
-        app_id=CONFIG.APP_ID,
-        app_password=CONFIG.APP_PASSWORD
-    )
-
-# Create adapter with authentication configuration
-ADAPTER = CloudAdapter(auth_config)
 logger.info("Created CloudAdapter with authentication configuration")
 
 # Catch-all for errors.
