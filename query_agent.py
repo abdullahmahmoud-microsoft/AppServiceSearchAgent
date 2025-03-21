@@ -11,7 +11,6 @@ from botbuilder.schema import Activity, ActivityTypes
 from bot import MyBot
 from config import DefaultConfig
 from azure.identity import ManagedIdentityCredential
-from botframework.connector.auth import ManagedIdentityCredential
 
 from http import HTTPStatus
 from aiohttp.web import Response, json_response
@@ -34,13 +33,7 @@ logger.info(f"APP_TENANTID: {CONFIG.APP_TENANTID}")
 # logger.info(f"DEPLOYMENT_NAME: {CONFIG.DEPLOYMENT_NAME}")
 #logger.info(f"USER_ASSIGNED_CLIENT_ID: {CONFIG.USER_ASSIGNED_CLIENT_ID}")
 
-credential = ManagedIdentityCredential(client_id=CONFIG.USER_ASSIGNED_CLIENT_ID)
-auth_config = ConfigurationBotFrameworkAuthentication (
-    app_id=CONFIG.APP_ID,
-    credential=credential
-)
-
-ADAPTER = CloudAdapter(auth_config)
+ADAPTER = CloudAdapter(ManagedIdentityCredential(client_id=CONFIG.USER_ASSIGNED_CLIENT_ID))
 
 logger.info("Created CloudAdapter with authentication configuration")
 

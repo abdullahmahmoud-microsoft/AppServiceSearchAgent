@@ -7,3 +7,4 @@ class DefaultConfig:
     APP_PASSWORD = os.environ.get("MicrosoftAppPassword", "")
     APP_TYPE = os.environ.get("MicrosoftAppType", "UserAssignedMSI")
     APP_TENANTID = os.environ.get("MicrosoftAppTenantId", "")
+    USER_ASSIGNED_CLIENT_ID = os.environ.get("AZURE_CLIENT_ID", "")
