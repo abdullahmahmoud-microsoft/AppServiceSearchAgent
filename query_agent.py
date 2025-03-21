@@ -1,82 +1,77 @@
-import sys
 import os
 import traceback
 import logging
 from datetime import datetime
 from aiohttp import web
 from botbuilder.core import TurnContext
-from botbuilder.integration.aiohttp import CloudAdapter
+from botbuilder.integration.aiohttp import CloudAdapter, ConfigurationBotFrameworkAuthentication
 from botbuilder.core.integration import aiohttp_error_middleware
-from botbuilder.integration.aiohttp import CloudAdapter, ConfigurationBotFrameworkAuthentication 
 from botbuilder.schema import Activity, ActivityTypes
 from bot import MyBot
 from config import DefaultConfig
 from azure.identity import ManagedIdentityCredential
-from botframework.connector.auth import ManagedIdentityAppCredentials
-
 from http import HTTPStatus
 from aiohttp.web import Response, json_response
+import jwt  # For debugging only
 
-from azure.identity import ManagedIdentityCredential
-from botframework.connector.auth import (
-    ClaimsIdentity,
-    MicrosoftAppCredentials,
-    AuthenticationConfiguration,
-    SimpleCredentialProvider,
-    CloudEnvironment,
-    ConfigurationServiceClientCredentialFactory,
-    ServiceClientCredentialsFactory,
-    ConfigurationBotFrameworkAuthentication,
-)
-from config import DefaultConfig
-
+# Logging setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 CONFIG = DefaultConfig()
 
-# MSI credential with forced UAMI
-uami_credential = ManagedIdentityCredential(client_id=CONFIG.MicrosoftAppClientId)
+# 🔍 Patch token validation to debug Invalid AppId errors
+original_authenticate_request = ConfigurationBotFrameworkAuthentication.authenticate_request
 
-# Build manual settings dict to avoid env var name mismatch bugs
-auth_config = ConfigurationBotFrameworkAuthentication({
-    "MicrosoftAppId": CONFIG.MicrosoftAppId,
-    "MicrosoftAppType": CONFIG.MicrosoftAppType,
-    "MicrosoftAppTenantId": CONFIG.MicrosoftAppTenantId,
-    "MicrosoftAppClientId": CONFIG.MicrosoftAppClientId
-})
+async def debug_authenticate_request(self, activity, auth_header):
+    print("🔍 Token validation triggered...")
+    print(f"✅ CONFIG.MicrosoftAppId: {CONFIG.MicrosoftAppId}")
+    print(f"✅ CONFIG.MicrosoftAppClientId (UAMI): {CONFIG.MicrosoftAppClientId}")
+    print(f"✅ CONFIG.MicrosoftAppTenantId: {CONFIG.MicrosoftAppTenantId}")
+    print(f"✅ CONFIG.MicrosoftAppType: {CONFIG.MicrosoftAppType}")
 
+    try:
+        parts = auth_header.split(" ")
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            decoded = jwt.decode(parts[1], options={"verify_signature": False})
+            print("🔐 Decoded token:")
+            for k, v in decoded.items():
+                print(f"  {k}: {v}")
+        else:
+            print("⚠️ No bearer token found in Authorization header.")
+    except Exception as e:
+        print(f"⚠️ Failed to decode token: {e}")
+
+    return await original_authenticate_request(self, activity, auth_header)
+
+ConfigurationBotFrameworkAuthentication.authenticate_request = debug_authenticate_request
+
+# 🔧 Create adapter
+auth_config = ConfigurationBotFrameworkAuthentication(CONFIG)
+ADAPTER = CloudAdapter(auth_config)
 logger.info("Created CloudAdapter with authentication configuration")
 
-# Catch-all for errors.
+# 🔄 Catch-all for unhandled errors
 async def on_error(context: TurnContext, error: Exception):
-    logger.error(f"\n [on_turn_error] unhandled error: {error}", exc_info=True)
-    traceback.print_exc()
-
-    # Send a message to the user
-    await context.send_activity("The bot encountered an error or bug.")
-    await context.send_activity(
-        "To continue to run this bot, please fix the bot source code."
-    )
-    # Send a trace activity if we're talking to the Bot Framework Emulator
+    logger.error(f"[on_turn_error] unhandled error: {error}", exc_info=True)
+    await context.send_activity("The bot encountered an error.")
+    await context.send_activity("Please fix the bot source code.")
     if context.activity.channel_id == "emulator":
-        trace_activity = Activity(
+        await context.send_activity(Activity(
             label="TurnError",
             name="on_turn_error Trace",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(datetime.timezone.utc),
             type=ActivityTypes.trace,
             value=f"{error}",
             value_type="https://www.botframework.com/schemas/error",
-        )
-        await context.send_activity(trace_activity)
+        ))
 
 ADAPTER.on_turn_error = on_error
-logger.info("Set on_turn_error handler for ADAPTER")
 
-# Create the Bot
+# 🤖 Create bot instance
 BOT = MyBot()
-logger.debug("Created MyBot instance")
 
+# ✅ Debug token endpoint
 async def debug_token(req):
     try:
         credential = ManagedIdentityCredential(client_id=os.environ["AZURE_CLIENT_ID"])
@@ -84,64 +79,45 @@ async def debug_token(req):
         return Response(text=f"✅ Got token:\n{token.token[:50]}...", status=200)
     except Exception as e:
         return Response(text=f"❌ Failed to get token: {str(e)}", status=500)
-    
-# Listen for incoming requests on /api/messages
+
+# 📥 Incoming messages
 async def messages(req: web.Request) -> web.Response:
     logger.info("Received request at /api/messages")
     logger.info(f"Request headers: {req.headers}")
 
-    if "application/json" in req.headers["Content-Type"]:
-        body = await req.json()
-        logger.info(f"Request body: {body}")
-    else:
+    if "application/json" not in req.headers.get("Content-Type", ""):
         logger.warning("Unsupported media type")
         return Response(status=HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
 
     try:
+        body = await req.json()
+        logger.info(f"Request body: {body}")
         activity = Activity().deserialize(body)
-        logger.info(f"Deserialized activity: {activity}")
     except Exception as e:
         logger.error(f"Failed to deserialize activity: {e}", exc_info=True)
         return Response(status=HTTPStatus.BAD_REQUEST)
 
-    auth_header = req.headers["Authorization"] if "Authorization" in req.headers else ""
-    logger.info(f"Authorization header: {auth_header}")
-    
-    import jwt
-
-    # For debugging only
-    try:
-        parts = auth_header.split(" ")
-        if len(parts) == 2 and parts[0].lower() == "bearer":
-            decoded = jwt.decode(parts[1], options={"verify_signature": False})
-            logger.info(f"Decoded token: {decoded}")
-    except Exception as decode_err:
-        logger.warning(f"Failed to decode JWT for debugging: {decode_err}")
-
+    auth_header = req.headers.get("Authorization", "")
+    logger.info(f"Authorization header: {auth_header[:80]}...")
 
     try:
         response = await ADAPTER.process_activity(auth_header, activity, BOT.on_turn)
         if response:
-            logger.info("Response generated by bot")
-            logger.info(f"Response body: {response.body}")
             return json_response(data=response.body, status=response.status)
-        logger.info("No response generated by bot")
         return Response(status=HTTPStatus.OK)
     except Exception as e:
         logger.error(f"Error processing activity: {e}", exc_info=True)
         return Response(status=HTTPStatus.INTERNAL_SERVER_ERROR)
 
+# 🌐 App init
 APP = web.Application(middlewares=[aiohttp_error_middleware])
-logger.info("Created web application with aiohttp_error_middleware")
 APP.router.add_post("/api/messages", messages)
-logger.info("Added POST route for /api/messages")
-
 APP.router.add_get("/debug-token", debug_token)
-logger.info("Added GET route for /debug-token")
+
+logger.info("App is ready!")
 
 if __name__ == "__main__":
     try:
-        logger.info("Starting web application")
         web.run_app(APP, host="0.0.0.0", port=3978)
     except Exception as error:
         logger.error("Failed to start web application", exc_info=True)
