@@ -4,13 +4,15 @@ import logging
 from datetime import datetime
 from aiohttp import web
 from botbuilder.core import TurnContext
+from botbuilder.integration.aiohttp import CloudAdapter
 from botbuilder.core.integration import aiohttp_error_middleware
-from botbuilder.integration.aiohttp import CloudAdapter, ConfigurationBotFrameworkAuthentication
+from botbuilder.integration.aiohttp import CloudAdapter, ConfigurationBotFrameworkAuthentication 
 from botbuilder.schema import Activity, ActivityTypes
 from bot import MyBot
 from config import DefaultConfig
 from azure.identity import ManagedIdentityCredential
-from botframework.connector.auth import ManagedIdentityAppCredentials
+from botframework.connector.auth import ManagedIdentityCredential
+
 from http import HTTPStatus
 from aiohttp.web import Response, json_response
 
@@ -32,7 +34,13 @@ logger.info(f"APP_TENANTID: {CONFIG.APP_TENANTID}")
 # logger.info(f"DEPLOYMENT_NAME: {CONFIG.DEPLOYMENT_NAME}")
 #logger.info(f"USER_ASSIGNED_CLIENT_ID: {CONFIG.USER_ASSIGNED_CLIENT_ID}")
 
-ADAPTER = CloudAdapter(ConfigurationBotFrameworkAuthentication(CONFIG))
+credential = ManagedIdentityCredential(client_id=CONFIG.USER_ASSIGNED_CLIENT_ID)
+auth_config = ConfigurationBotFrameworkAuthentication (
+    app_id=CONFIG.APP_ID,
+    credential=credential
+)
+
+ADAPTER = CloudAdapter(auth_config)
 
 logger.info("Created CloudAdapter with authentication configuration")
 
